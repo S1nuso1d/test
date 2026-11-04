@@ -12,12 +12,12 @@
 
 В корне репозитория находится архив полного проекта:
 
-`product_copy_ai_ollama_fix.zip`
+`product_copy_ai_ollama_fix.tar.gz`
 
-После `git pull` распакуйте его:
+После `git pull` распакуйте его в корень репозитория:
 
 ```powershell
-Expand-Archive -Path .\product_copy_ai_ollama_fix.zip -DestinationPath . -Force
+tar -xzf .\product_copy_ai_ollama_fix.tar.gz
 Set-Location .\product_copy_ai
 ```
 
