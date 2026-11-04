@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Product Copy AI</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, Segoe UI, sans-serif; }
+    body { margin: 0; background: #f3f5f8; color: #172033; }
+    main { max-width: 1100px; margin: 36px auto; padding: 0 20px; }
+    .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+    section { background: white; border: 1px solid #e1e6ee; border-radius: 14px; padding: 22px; box-shadow: 0 5px 20px #1720330a; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 0 0 16px; font-size: 18px; }
+    p { color: #58657a; line-height: 1.5; }
+    textarea { width: 100%; min-height: 390px; box-sizing: border-box; resize: vertical; padding: 14px; border: 1px solid #cbd4e0; border-radius: 9px; font: 13px/1.5 Consolas, monospace; }
+    button { border: 0; border-radius: 9px; padding: 11px 16px; background: #245bdb; color: white; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #e9eef8; color: #23385f; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+    .result { min-height: 120px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+    .muted { color: #7b8798; }
+    .error { color: #b42318; }
+    .status { display: inline-block; padding: 4px 9px; border-radius: 20px; background: #edf2ff; color: #244da8; font-size: 12px; margin-bottom: 12px; }
+    .field { margin: 15px 0; }
+    .field strong { display: block; margin-bottom: 5px; }
+    .copy { margin-left: 8px; padding: 5px 9px; font-size: 12px; }
+    .connection { margin: 0 0 14px; padding: 10px 12px; border-radius: 8px; background: #f4f6fa; color: #475467; font-size: 13px; }
+    .connection.ok { background: #ecfdf3; color: #067647; }
+    .connection.error { background: #fef3f2; color: #b42318; }
+    @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } main { margin-top: 20px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Product Copy AI</h1>
+  <p>Черновик B2B-карточки товара по исходным данным. Технические характеристики в выдаче копируются из источника, а не генерируются моделью.</p>
+  <div id="connection" class="connection">Настройки локального сервера Ollama загружаются...</div>
+  <div class="actions" style="margin: 0 0 16px">
+    <button class="secondary" id="check-connection">Проверить подключение Ollama</button>
+  </div>
+  <div class="layout">
+    <section>
+      <h2>1. Данные товара (JSON)</h2>
+      <textarea id="payload" spellcheck="false">{
+  "name": "Манометр показывающий DM 02",
+  "manufacturer": "Манотомь",
+  "specs": {
+    "диапазон измерений": "0–1,6 МПа",
+    "класс точности": "1,5",
+    "присоединение": "G1/2",
+    "диаметр корпуса": "100 мм"
+  },
+  "description": "Прибор предназначен для измерения избыточного давления..."
+}</textarea>
+      <div class="actions">
+        <button id="generate">Сгенерировать карточку</button>
+        <button class="secondary" id="reset">Вернуть пример</button>
+      </div>
+      <p class="muted">Для проверки можно заменить JSON своими данными. Неизвестные поля и пустые значения будут отмечены.</p>
+    </section>
+    <section>
+      <h2>2. Результат</h2>
+      <div id="output" class="result muted">Результат появится здесь после генерации.</div>
+    </section>
+  </div>
+</main>
+<script>
+const initialPayload = document.getElementById('payload').value;
+const button = document.getElementById('generate');
+const output = document.getElementById('output');
+const connection = document.getElementById('connection');
+
+async function refreshApiStatus() {
+  try {
+    const response = await fetch('/api/status');
+    const data = await response.json();
+    connection.className = 'connection';
+    connection.textContent = `Провайдер: ${data.provider} · Модель: ${data.model} · Сервер: ${data.base_url}`;
+  } catch (error) {
+    connection.className = 'connection error';
+    connection.textContent = 'Не удалось получить статус приложения.';
+  }
+}
+
+document.getElementById('reset').addEventListener('click', () => {
+  document.getElementById('payload').value = initialPayload;
+});
+
+document.getElementById('check-connection').addEventListener('click', async (event) => {
+  const checkButton = event.currentTarget;
+  checkButton.disabled = true;
+  connection.className = 'connection';
+  connection.textContent = 'Отправляем короткий запрос в локальную модель Ollama...';
+  try {
+    const response = await fetch('/api/test-connection', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Не удалось проверить подключение.');
+    connection.className = 'connection ok';
+    connection.textContent = `Ollama подключён · ${data.model} · ответ модели: ${data.reply}`;
+  } catch (error) {
+    connection.className = 'connection error';
+    connection.textContent = `Ошибка подключения: ${error.message}`;
+  } finally {
+    checkButton.disabled = false;
+  }
+});
+
+button.addEventListener('click', async () => {
+  button.disabled = true;
+  output.className = 'result muted';
+  output.textContent = 'Генерация...';
+  try {
+    const product = JSON.parse(document.getElementById('payload').value);
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(product)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+    renderResult(data);
+  } catch (error) {
+    output.className = 'result error';
+    output.textContent = `Ошибка: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+refreshApiStatus();
+
+function renderResult(data) {
+  output.className = 'result';
+  output.replaceChildren();
+  const status = document.createElement('span');
+  status.className = 'status';
+  status.textContent = data.status === 'generated' ? 'Черновик готов' : 'Нужно больше данных';
+  output.append(status);
+
+  const sections = [
+    ['SEO-заголовок', data.seo_title],
+    ['SEO-описание', data.seo_description],
+    ['Ключевые характеристики', (data.key_characteristics || []).map(x => `${x.name}: ${x.value}`).join('\n')],
+    ['Поисковые запросы', (data.seo_queries || []).join('\n')],
+    ['Коммерческий блок', data.commercial_block],
+    ['Отсутствующие поля', (data.missing_fields || []).join(', ') || 'Нет'],
+    ['Предупреждения', (data.warnings || []).join('\n') || 'Нет']
+  ];
+  for (const [heading, value] of sections) {
+    if (value === null || value === undefined || value === '') continue;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'field';
+    const title = document.createElement('strong');
+    title.textContent = heading;
+    const body = document.createElement('div');
+    body.textContent = value;
+    wrapper.append(title, body);
+    output.append(wrapper);
+  }
+  const copy = document.createElement('button');
+  copy.className = 'secondary';
+  copy.textContent = 'Скопировать JSON';
+  copy.addEventListener('click', () => navigator.clipboard.writeText(JSON.stringify(data, null, 2)));
+  output.append(copy);
+}
+</script>
+</body>
+</html>
