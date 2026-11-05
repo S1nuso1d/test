@@ -111,6 +111,7 @@ def _to_response(
 async def generate_product_copy(
     product: ProductInput,
     settings: Settings,
+    model_name: str | None = None,
 ) -> GenerationResponse:
     missing_data = find_missing_data(product)
     if not has_substantive_product_data(product):
@@ -129,7 +130,7 @@ async def generate_product_copy(
             quality_score=0,
         )
 
-    client = LLMClient(settings)
+    client = LLMClient(settings, model_name=model_name)
     source_text = build_source_text(product)
     correction: str | None = None
     best_draft: LLMProductCopy | None = None
