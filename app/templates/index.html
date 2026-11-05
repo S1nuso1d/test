@@ -885,8 +885,11 @@ function renderBatch(data) {
       const title = document.createElement("h4");
       title.className = "batch-item-title";
       title.textContent = item.index + ". " + (item.product_name || item.result.product_name || "Товар");
-      output.append(title);
-      renderResult(item.result, output, false);
+      const itemContainer = document.createElement("div");
+      itemContainer.className = "batch-result-item";
+      itemContainer.append(title);
+      output.append(itemContainer);
+      renderResult(item.result, itemContainer, false);
     } else {
       const failed = document.createElement("div");
       failed.className = "error-box";
