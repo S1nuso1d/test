@@ -1,7 +1,7 @@
 import re
 from collections.abc import Iterable
 
-from app.schemas import FactCheckFinding, LLMProductCopy
+from app.schemas import FactCheckFinding, LLMProductCopy, ProductInput
 
 
 # These rules target concrete product properties or formal statuses that are
@@ -108,17 +108,23 @@ def audit_text_claims(
     checks the explicit rule set above and must not be presented as proof that
     text without findings is factually correct.
     """
-    source = source_text.casefold()
     findings: list[FactCheckFinding] = []
     seen: set[tuple[str, str]] = set()
 
     for label, expression, severity, explanation in _RULES:
         pattern = re.compile(expression, re.IGNORECASE)
-        if pattern.search(source):
-            continue
+        source_matches = {
+            re.sub(r"\s+", "", match.group(0)).upper()
+            for match in pattern.finditer(source_text)
+        }
 
         for match in pattern.finditer(generated_text):
             claim = match.group(0).strip()
+            if label == "Степень защиты IP":
+                if re.sub(r"\s+", "", claim).upper() in source_matches:
+                    continue
+            elif source_matches:
+                continue
             key = (label, claim.casefold())
             if key in seen:
                 continue
@@ -151,9 +157,119 @@ def audit_text_claims(
     return findings
 
 
+
+
+
+_SPEC_ALIAS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Диапазон измерений", ("диапазон измерений", "диапазон", "предел измерения")),
+    ("Класс точности", ("класс точности", "точность")),
+    ("Присоединение", ("присоединение", "резьба", "тип соединения")),
+    ("Диаметр корпуса", ("диаметр корпуса", "диаметр циферблата", "диаметр")),
+    ("Степень защиты", ("степень защиты", "защита ip", "ip")),
+    ("Напряжение питания", ("напряжение питания", "питание", "напряжение")),
+    ("Выходной сигнал", ("выходной сигнал", "сигнал выхода")),
+    ("Диапазон температуры", ("диапазон температуры", "температурный диапазон")),
+)
+_SPEC_NUMBER_RE = re.compile(r"(?<![\w])\d+(?:[.,]\d+)?(?![\w])")
+_SPEC_UNIT_RE = re.compile(
+    r"(?<![\w])(?P<number>\d+(?:[.,]\d+)?)\s*"
+    r"(?P<unit>°\s*[cс]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
+    r"мм|см|мкм|нм|км|м|ма|квт|вт|мв|кв|в|а|кг|мг|г|мл|л|"
+    r"khz|mhz|ghz|hz|mpa|kpa|gpa|pa|bar|atm|mm|cm|um|nm|km|"
+    r"ma|kw|w|mv|kv|v|kg|mg|g|ml|l)"
+    r"(?![\w])",
+    re.IGNORECASE,
+)
+
+
+def _normalized_numbers(text: str) -> set[str]:
+    return {
+        format(float(value.replace(",", ".")), ".12g")
+        for value in _SPEC_NUMBER_RE.findall(text)
+    }
+
+
+def _normalized_pairs(text: str) -> set[tuple[str, str]]:
+    return {
+        (
+            format(float(match.group("number").replace(",", ".")), ".12g"),
+            re.sub(r"\s+", "", match.group("unit").casefold()),
+        )
+        for match in _SPEC_UNIT_RE.finditer(text)
+    }
+
+
+def _aliases_for_spec(key: str) -> tuple[str, ...]:
+    normalized = key.casefold().strip()
+    for _label, aliases in _SPEC_ALIAS_GROUPS:
+        if any(alias in normalized for alias in aliases):
+            return aliases
+    return (normalized,) if len(normalized) >= 3 else ()
+
+
+def _value_context(text: str, end: int) -> str:
+    tail = text[end : end + 180]
+    stop = re.search(r"[.!?]\s+|[\n;]", tail)
+    return tail[: stop.start()] if stop else tail
+
+
+def audit_spec_value_mismatches(
+    generated_text: str,
+    product: ProductInput,
+    field: str,
+) -> list[FactCheckFinding]:
+    """Check values near known attribute labels against the corresponding source spec."""
+    findings: list[FactCheckFinding] = []
+    generated_folded = generated_text.casefold()
+
+    for key, raw_value in product.specs.items():
+        if raw_value is None or not str(raw_value).strip():
+            continue
+        aliases = _aliases_for_spec(key)
+        expected_text = str(raw_value)
+        expected_numbers = _normalized_numbers(expected_text)
+        expected_pairs = _normalized_pairs(expected_text)
+        if not aliases or not expected_numbers:
+            continue
+
+        mismatch_context: str | None = None
+        for alias in aliases:
+            if not alias:
+                continue
+            for match in re.finditer(re.escape(alias), generated_folded):
+                context = _value_context(generated_text, match.end())
+                actual_numbers = _normalized_numbers(context)
+                actual_pairs = _normalized_pairs(context)
+                if not actual_numbers:
+                    continue
+                numbers_match = expected_numbers.issubset(actual_numbers)
+                units_match = not expected_pairs or expected_pairs.issubset(actual_pairs)
+                if not numbers_match or not units_match:
+                    mismatch_context = context.strip()[:120]
+                    break
+            if mismatch_context:
+                break
+
+        if mismatch_context:
+            findings.append(
+                FactCheckFinding(
+                    field=field,
+                    category=key,
+                    claim=mismatch_context,
+                    severity="critical",
+                    message=(
+                        f"Значение рядом с параметром «{key}» не совпадает с исходным "
+                        f"значением «{expected_text}». Сверьте его с источником."
+                    ),
+                )
+            )
+    return findings
+
+
 def audit_draft_claims(
     draft: LLMProductCopy,
     source_text: str,
+    product: ProductInput | None = None,
 ) -> list[FactCheckFinding]:
     """Audit every generated text field against the original product input."""
     sales = draft.sales_section
@@ -169,4 +285,6 @@ def audit_draft_claims(
     findings: list[FactCheckFinding] = []
     for field, content in fields:
         findings.extend(audit_text_claims(content, source_text, field))
+        if product is not None:
+            findings.extend(audit_spec_value_mismatches(content, product, field))
     return findings
