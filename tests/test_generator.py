@@ -97,7 +97,7 @@ async def test_generator_returns_needs_review_after_three_invalid_results(monkey
     async def fake_generate_json(self, system_prompt: str, user_prompt: str) -> dict:
         nonlocal calls
         calls += 1
-        return good_response(seo_description="Слишком короткий SEO-текст.")
+        return good_response(seo_queries=["только один запрос"])
 
     monkeypatch.setattr("app.services.generator.LLMClient.generate_json", fake_generate_json)
     result = await generate_product_copy(PRODUCT, Settings())
@@ -106,8 +106,56 @@ async def test_generator_returns_needs_review_after_three_invalid_results(monkey
     assert result.status == "needs_review"
     assert result.attempts == 3
     assert result.validation_errors
-    assert result.seo_description == "Слишком короткий SEO-текст."
-    assert any("не должна считаться готовой" in warning for warning in result.warnings)
+    assert any("3–5" in issue for issue in result.validation_errors)
+    assert result.seo_repair_attempts == 0
+
+
+async def test_generator_repairs_only_short_seo_description(monkeypatch) -> None:
+    generation_calls = 0
+    repair_calls = 0
+
+    async def fake_generate_json(self, system_prompt: str, user_prompt: str) -> dict:
+        nonlocal generation_calls
+        generation_calls += 1
+        return good_response(seo_description="Короткое описание.")
+
+    async def fake_repair(self, system_prompt: str, user_prompt: str) -> str:
+        nonlocal repair_calls
+        repair_calls += 1
+        return good_response()["seo_description"]
+
+    monkeypatch.setattr("app.services.generator.LLMClient.generate_json", fake_generate_json)
+    monkeypatch.setattr("app.services.generator.LLMClient.repair_seo_description", fake_repair)
+    result = await generate_product_copy(PRODUCT, Settings())
+
+    assert generation_calls == 3
+    assert repair_calls == 1
+    assert result.status == "generated"
+    assert 800 <= len(result.seo_description or "") <= 1200
+    assert result.seo_repair_attempts == 1
+    assert result.quality_score == 100
+
+
+async def test_generator_uses_safe_fallback_when_targeted_repair_stays_short(monkeypatch) -> None:
+    async def fake_generate_json(self, system_prompt: str, user_prompt: str) -> dict:
+        return good_response(seo_description="Короткое описание.")
+
+    repair_calls = 0
+
+    async def fake_repair(self, system_prompt: str, user_prompt: str) -> str:
+        nonlocal repair_calls
+        repair_calls += 1
+        return "Всё ещё слишком коротко."
+
+    monkeypatch.setattr("app.services.generator.LLMClient.generate_json", fake_generate_json)
+    monkeypatch.setattr("app.services.generator.LLMClient.repair_seo_description", fake_repair)
+    result = await generate_product_copy(PRODUCT, Settings())
+
+    assert repair_calls == 2
+    assert result.status == "generated"
+    assert 800 <= len(result.seo_description or "") <= 1200
+    assert result.seo_repair_attempts == 2
+    assert any("резервным локальным шаблоном" in warning for warning in result.warnings)
 
 
 async def test_generator_retries_unsupported_number_in_search_query(monkeypatch) -> None:
