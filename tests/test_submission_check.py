@@ -1,4 +1,4 @@
-from scripts.run_submission_check import evaluate_result
+from scripts.run_submission_check import assignment_examples_confirmed, evaluate_result
 
 
 def make_product():
@@ -96,3 +96,15 @@ def test_evaluate_result_rejects_missing_marker_omission():
         "данных нет" in issue
         for issue in evaluate_result(product, result)
     )
+
+
+def test_external_demo_does_not_confirm_employer_assignment_inputs():
+    assert not assignment_examples_confirmed(2, 2, employer_data_confirmed=False)
+
+
+def test_two_employer_inputs_can_confirm_assignment_completeness():
+    assert assignment_examples_confirmed(2, 2, employer_data_confirmed=True)
+
+
+def test_assignment_stays_incomplete_without_two_successful_results():
+    assert not assignment_examples_confirmed(2, 1, employer_data_confirmed=True)
