@@ -428,7 +428,11 @@ def calculate_quality_score(draft: LLMProductCopy, source_text: str) -> int:
         score += 15
     if 800 <= len(description) <= 1200:
         score += 30
-    if 3 <= len(queries) <= 5:
+    normalized_queries = [
+        " ".join(re.findall(r"[a-zа-яё0-9]+", item.casefold()))
+        for item in queries
+    ]
+    if 3 <= len(queries) <= 5 and len(normalized_queries) == len(set(normalized_queries)):
         score += 15
     if sales.suitable_for and any(item.strip() for item in sales.suitable_for):
         score += 10
