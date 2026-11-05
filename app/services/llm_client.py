@@ -42,7 +42,7 @@ class LLMClient:
             if status == 404:
                 raise LLMClientError(
                     f"Модель '{self.model_name}' не найдена в Ollama. "
-                    f"Выполните: ollama pull {self.settings.ollama_model}"
+                    f"Выполните: ollama pull {self.model_name}"
                 ) from exc
             raise LLMClientError(
                 f"Ollama вернул ошибку{f' (HTTP {status})' if status else ''}: {detail}"
