@@ -152,7 +152,8 @@ async def test_generator_uses_safe_fallback_when_targeted_repair_stays_short(mon
     result = await generate_product_copy(PRODUCT, Settings())
 
     assert repair_calls == 2
-    assert result.status == "generated"
+    assert result.status == "needs_review"
+    assert result.seo_fallback_used is True
     assert 800 <= len(result.seo_description or "") <= 1200
     assert result.seo_repair_attempts == 2
     assert any("резервным локальным шаблоном" in warning for warning in result.warnings)
