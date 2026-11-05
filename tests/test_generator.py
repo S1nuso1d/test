@@ -188,3 +188,37 @@ async def test_generator_does_not_call_llm_without_substantive_data(monkeypatch)
     result = await generate_product_copy(ProductInput(name="Манометр DM 02"), Settings())
     assert result.status == "needs_data"
     assert result.attempts == 0
+
+
+
+async def test_generator_retries_when_technical_range_is_put_in_audience_field(monkeypatch) -> None:
+    calls = 0
+    prompts: list[str] = []
+
+    async def fake_generate_json(self, system_prompt: str, user_prompt: str) -> dict:
+        nonlocal calls
+        prompts.append(user_prompt)
+        calls += 1
+        if calls == 1:
+            return good_response(
+                sales_section={
+                    "suitable_for": [
+                        "Для специалистов с диапазоном измерений до 1,6 МПа"
+                    ],
+                    "tasks_solved": ["Измерение избыточного давления"],
+                    "pitch": "Перед подбором сверьте параметры по паспорту.",
+                }
+            )
+        return good_response()
+
+    monkeypatch.setattr("app.services.generator.LLMClient.generate_json", fake_generate_json)
+    result = await generate_product_copy(PRODUCT, Settings())
+
+    assert calls == 2
+    assert result.status == "generated"
+    assert result.attempts == 2
+    assert "Поле «Кому подходит»" in prompts[1]
+    assert result.sales_section is not None
+    assert result.sales_section.suitable_for == [
+        "Специалисты по подбору приборов измерения давления"
+    ]
