@@ -214,3 +214,160 @@ def validate_generated_copy(draft: LLMProductCopy, source_text: str) -> list[str
 def has_substantive_product_data(product: ProductInput) -> bool:
     has_specs = any(value is not None and str(value).strip() for value in product.specs.values())
     return bool(product.name and (product.description or has_specs))
+
+
+def validate_seo_description(description: str, source_text: str) -> list[str]:
+    """Validate only the SEO description so it can be repaired independently."""
+    issues: list[str] = []
+    cleaned = description.strip()
+    if not 800 <= len(cleaned) <= 1200:
+        issues.append(
+            f"SEO-описание содержит {len(cleaned)} символов; требуется 800–1200"
+        )
+    unsupported = find_unsupported_numbers(cleaned, source_text)
+    if unsupported:
+        issues.append(
+            "В SEO-описании есть числовые значения, отсутствующие во входных данных: "
+            + ", ".join(unsupported)
+        )
+    return issues
+
+
+def build_safe_seo_description(product: ProductInput) -> str:
+    """Build a transparent, fact-safe fallback from source data and buyer checklists.
+
+    The text describes no new product properties: generic passages are framed as
+    checks the buyer should perform, not as claims about the instrument.
+    """
+    name = product.name or "Указанный прибор"
+    identity = f"В исходных данных указан товар «{name}»."
+    if product.manufacturer:
+        identity += f" Производитель — {product.manufacturer}."
+
+    source_description = (product.description or "").strip()
+    if len(source_description) > 260:
+        source_description = source_description[:257].rsplit(" ", 1)[0].rstrip(" ,;:") + "…"
+    if source_description:
+        identity += f" В описании указано: {source_description}"
+
+    values = [
+        (str(key).strip(), _stringify(value).strip())
+        for key, value in product.specs.items()
+        if value is not None and _stringify(value).strip()
+    ]
+    blocks = [identity]
+    if values:
+        summary = "В карточке приведены характеристики: " + "; ".join(
+            f"{key} — {value}" for key, value in values[:5]
+        ) + "."
+        blocks.append(summary)
+
+    hints: list[str] = []
+    for key, value in values:
+        normalized = key.casefold()
+        if any(token in normalized for token in ("диапазон", "range", "предел измер")):
+            hint = (
+                f"Параметр «{key}» ({value}) сопоставьте с ожидаемыми условиями измерения "
+                "и требованиями процесса. Допустимый режим проверьте по паспорту: "
+                "указанное значение само по себе не подтверждает пригодность для конкретной установки."
+            )
+        elif any(token in normalized for token in ("точност", "accuracy")):
+            hint = (
+                f"Параметр «{key}» ({value}) сравните с требованиями к измерительной задаче. "
+                "Одно обозначение не позволяет делать выводы о поверке, межповерочном "
+                "интервале или погрешности в конкретных условиях."
+            )
+        elif any(token in normalized for token in ("присоедин", "резьб", "connection", "thread")):
+            hint = (
+                f"Значение «{key}» ({value}) сверьте с ответной частью и монтажной документацией. "
+                "Исходные данные не подтверждают совместимость по типу резьбы, уплотнению "
+                "и другим параметрам узла."
+            )
+        elif any(token in normalized for token in ("диаметр", "размер", "габарит", "diameter", "size")):
+            hint = (
+                f"Параметр «{key}» ({value}) используйте для предварительной проверки компоновки. "
+                "Для окончательного решения могут потребоваться чертёж и установочные размеры; "
+                "по одному значению нельзя подтвердить возможность монтажа."
+            )
+        else:
+            hint = (
+                f"Параметр «{key}» ({value}) сопоставьте с требованиями вашей задачи и паспортом "
+                "изделия. Не переносите выводы о свойствах и совместимости с похожих моделей."
+            )
+        hints.append(hint)
+
+    for hint in hints:
+        candidate = " ".join(blocks + [hint])
+        if len(candidate) <= 1180:
+            blocks.append(hint)
+
+    missing = find_missing_data(product)
+    if missing.expected_specs:
+        paragraph = (
+            "В исходных данных не указаны ожидаемые параметры: "
+            + ", ".join(missing.expected_specs[:5])
+            + ". Запросите их у поставщика, если они важны для выбора."
+        )
+        if len(" ".join(blocks + [paragraph])) <= 1200:
+            blocks.append(paragraph)
+
+    extras = [
+        (
+            "При сравнении предложений используйте одинаковые критерии и проверяйте, "
+            "что сведения относятся именно к указанной модели, а не к другой модификации."
+        ),
+        (
+            "Перед оформлением заказа подтвердите полное обозначение модели, состав поставки "
+            "и наличие нужной документации. Отсутствующие значения не следует заменять предположениями."
+        ),
+        (
+            "Описание основано только на переданных сведениях, не подтверждает совместимость "
+            "с конкретной системой и не заменяет паспорт изделия или консультацию производителя."
+        ),
+        (
+            "Если для выбора требуется дополнительный параметр, зафиксируйте его как вопрос "
+            "к поставщику и дождитесь документального подтверждения до согласования заказа."
+        ),
+    ]
+    for extra in extras:
+        current = " ".join(blocks)
+        if len(current) >= 800:
+            break
+        if len(current + " " + extra) <= 1200:
+            blocks.append(extra)
+
+    result = " ".join(blocks).strip()
+    while len(result) > 1200 and len(blocks) > 1:
+        blocks.pop()
+        result = " ".join(blocks).strip()
+
+    if not 800 <= len(result) <= 1200:
+        raise ValueError(
+            "Не удалось безопасно сформировать SEO-описание длиной 800–1200 символов."
+        )
+    return result
+
+
+def calculate_quality_score(draft: LLMProductCopy, source_text: str) -> int:
+    """Return a formal checklist score; it is not a semantic truthfulness score."""
+    score = 0
+    title = draft.seo_title.strip()
+    description = draft.seo_description.strip()
+    queries = [item.strip() for item in draft.seo_queries if item and item.strip()]
+    sales = draft.sales_section
+
+    if title and len(title) <= 70:
+        score += 15
+    if 800 <= len(description) <= 1200:
+        score += 30
+    if 3 <= len(queries) <= 5:
+        score += 15
+    if sales.suitable_for and any(item.strip() for item in sales.suitable_for):
+        score += 10
+    if sales.tasks_solved and any(item.strip() for item in sales.tasks_solved):
+        score += 10
+    if sales.pitch.strip():
+        score += 10
+    if not find_unsupported_numbers(all_generated_text(draft), source_text):
+        score += 10
+    return score
