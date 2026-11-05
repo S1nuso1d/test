@@ -125,6 +125,21 @@ class GenerationResponse(BaseModel):
     seo_fallback_used: bool = False
 
 
+class CatalogImportResponse(BaseModel):
+    imported_count: int
+    products: list[ProductInput] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class PassportImportResponse(BaseModel):
+    file_name: str
+    page_count: int
+    product: ProductInput
+    extracted_text: str
+    warnings: list[str] = Field(default_factory=list)
+
+
 class BatchGenerationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     products: list[ProductInput] = Field(min_length=1, max_length=10)
