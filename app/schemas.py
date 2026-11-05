@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ProductInput(BaseModel):
@@ -8,11 +8,11 @@ class ProductInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: str | None = None
-    manufacturer: str | None = None
-    category: str | None = None
-    specs: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
-    description: str | None = None
+    name: str | None = Field(default=None, max_length=200)
+    manufacturer: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=80)
+    specs: dict[str, str | int | float | bool | None] = Field(default_factory=dict, max_length=60)
+    description: str | None = Field(default=None, max_length=12_000)
 
     @field_validator("name", "manufacturer", "category", "description", mode="before")
     @classmethod
@@ -37,10 +37,22 @@ class ProductInput(BaseModel):
             key = str(raw_key).strip()
             if not key:
                 continue
+            if len(key) > 100:
+                raise ValueError("Название характеристики не должно превышать 100 символов")
             if isinstance(raw_value, str):
                 raw_value = raw_value.strip() or None
+                if raw_value is not None and len(raw_value) > 1_000:
+                    raise ValueError(f"Значение характеристики «{key}» превышает 1000 символов")
             normalized[key] = raw_value
         return normalized
+
+    @model_validator(mode="after")
+    def validate_total_input_size(self) -> "ProductInput":
+        total = sum(len(value or "") for value in (self.name, self.manufacturer, self.category, self.description))
+        total += sum(len(key) + len(str(value or "")) for key, value in self.specs.items())
+        if total > 20_000:
+            raise ValueError("Объём исходных данных превышает 20 000 символов")
+        return self
 
 
 class KeyCharacteristic(BaseModel):
@@ -98,6 +110,7 @@ class GenerationResponse(BaseModel):
     attempts: int = 0
     seo_repair_attempts: int = Field(default=0, ge=0, le=2)
     quality_score: int | None = Field(default=None, ge=0, le=100)
+    seo_fallback_used: bool = False
 
 
 class BatchGenerationRequest(BaseModel):
