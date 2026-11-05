@@ -9,7 +9,7 @@ def test_catalog_import_endpoint_accepts_csv_upload() -> None:
     content = (
         "Название;Производитель;Диапазон измерений\n"
         "Манометр DM 02;Манотомь;0–1,6 МПа\n"
-    ).encode("utf-8")
+    ).encode()
 
     response = client.post(
         "/api/import/catalog",
