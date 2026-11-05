@@ -91,6 +91,18 @@ def evaluate_result(product: dict[str, Any], result: dict[str, Any]) -> list[str
         if (_normalized(name), _normalized(value)) not in actual_specs:
             issues.append(f"Исходная характеристика «{name}: {value}» не перенесена точно.")
 
+    missing_data = result.get("missing_data") or {}
+    for expected_name in missing_data.get("expected_specs") or []:
+        rows = [
+            item for item in (result.get("key_characteristics") or [])
+            if isinstance(item, dict)
+            and _normalized(item.get("name")) == _normalized(expected_name)
+        ]
+        if not rows or not any(_normalized(item.get("value")) == "данных нет" for item in rows):
+            issues.append(
+                f"Для отсутствующей характеристики «{expected_name}» не указано «данных нет»."
+            )
+
     findings = result.get("fact_check_findings") or []
     if findings:
         issues.append(f"Автоматическая проверка нашла неподтверждённые утверждения: {len(findings)}.")
