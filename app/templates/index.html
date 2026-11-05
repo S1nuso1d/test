@@ -162,6 +162,16 @@
     }
     .form-actions .left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .helper { margin: 12px 0 0; color: #8a95a7; font-size: 11px; line-height: 1.45; }
+.import-panel {
+      margin: 0 23px 18px; padding: 13px 14px; border: 1px solid var(--line);
+      border-radius: 11px; background: #fbfcff;
+    }
+    .import-copy { display: grid; gap: 4px; margin-bottom: 10px; }
+    .import-copy strong { font-size: 12px; color: #46536a; }
+    .import-copy span, .import-status { color: #8792a4; font-size: 10px; line-height: 1.45; }
+    .import-controls { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; }
+    .import-controls .control { min-width: 0; min-height: 36px; padding: 6px 8px; font-size: 11px; }
+    .import-status { margin: 8px 0 0; }
     .json-mode textarea { min-height: 375px; font: 12px/1.55 "Cascadia Code", Consolas, monospace; }
     .json-hint {
       margin: 0 0 13px; padding: 10px 12px; border-radius: 9px;
@@ -298,6 +308,8 @@
       .panel-head { padding: 18px 16px 14px; }
       .panel-body, .result-body { padding: 0 16px 17px; }
       .tabs { margin: 0 16px 16px; }
+      .import-panel { margin: 0 16px 16px; }
+      .import-controls { grid-template-columns: 1fr; }
       .field-grid, .two-col { grid-template-columns: 1fr; }
       .field.full { grid-column: auto; }
       .spec-row { grid-template-columns: 1fr 1fr 30px; gap: 5px; }
@@ -364,6 +376,18 @@
         <div class="tabs" role="tablist" aria-label="Способ ввода">
           <button class="tab active" id="form-tab" type="button" role="tab" aria-selected="true" data-mode="form">Форма</button>
           <button class="tab" id="json-tab" type="button" role="tab" aria-selected="false" data-mode="json">JSON / пакет</button>
+        </div>
+
+        <div class="import-panel">
+          <div class="import-copy">
+            <strong>Импорт каталога или паспорта</strong>
+            <span>CSV / XLSX — до 10 товаров. PDF — один текстовый паспорт; сканы без OCR не поддерживаются.</span>
+          </div>
+          <div class="import-controls">
+            <input class="control" id="import-file" type="file" accept=".csv,.xlsx,.pdf">
+            <button class="button secondary small" id="import-button" type="button">Импортировать</button>
+          </div>
+          <p class="import-status" id="import-status" role="status">После импорта данные можно проверить и отредактировать перед генерацией.</p>
         </div>
 
         <div class="panel-body mode-panel" id="form-mode">
@@ -516,6 +540,76 @@ function loadExample() {
   addSpecRow("присоединение", "G1/2");
   addSpecRow("диаметр корпуса", "100 мм");
   $("payload-json").value = initialJson;
+}
+
+function fillFormFromProduct(product) {
+  clearForm();
+  $("product-name").value = product.name || "";
+  $("manufacturer").value = product.manufacturer || "";
+  $("category").value = product.category || "";
+  $("description").value = product.description || "";
+  for (const [key, value] of Object.entries(product.specs || {})) {
+    addSpecRow(key, value === null || value === undefined ? "" : String(value));
+  }
+}
+
+async function importSelectedFile() {
+  const file = $("import-file").files[0];
+  const button = $("import-button");
+  const status = $("import-status");
+  if (!file) {
+    showToast("Сначала выберите CSV, XLSX или PDF-файл.");
+    return;
+  }
+
+  const extension = file.name.split(".").pop().toLowerCase();
+  const isPdf = extension === "pdf";
+  if (!isPdf && !["csv", "xlsx"].includes(extension)) {
+    showToast("Поддерживаются только CSV, XLSX и PDF.");
+    return;
+  }
+
+  button.disabled = true;
+  const previousLabel = button.textContent;
+  button.textContent = "Импорт…";
+  status.textContent = "Читаем файл и проверяем извлечённые данные…";
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch(isPdf ? "/api/import/passport" : "/api/import/catalog", {
+      method: "POST",
+      body: formData
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      const detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data);
+      throw new Error(detail || "Не удалось импортировать файл.");
+    }
+
+    if (isPdf) {
+      fillFormFromProduct(data.product);
+      setMode("form");
+      status.textContent = "Извлечён текст из " + data.page_count + " стр. "
+        + "Проверьте название и характеристики. " + (data.warnings || []).join(" ");
+      showToast("Паспорт обработан. Проверьте извлечённые поля.");
+    } else {
+      $("payload-json").value = JSON.stringify(data.products || [], null, 2);
+      setMode("json");
+      const errors = (data.errors || []).length
+        ? " Пропущено строк с ошибками: " + data.errors.length + "."
+        : "";
+      status.textContent = "Импортировано товаров: " + data.imported_count + ". "
+        + (data.warnings || []).join(" ") + errors;
+      showToast("Каталог импортирован. Проверьте JSON перед пакетной генерацией.");
+    }
+  } catch (error) {
+    status.textContent = error.message || "Не удалось импортировать файл.";
+    showToast(status.textContent);
+  } finally {
+    button.disabled = false;
+    button.textContent = previousLabel;
+    $("import-file").value = "";
+  }
 }
 
 function setMode(mode) {
@@ -1226,6 +1320,7 @@ $("reset-json").addEventListener("click", () => {
   $("payload-json").value = initialJson;
   showToast("Пример JSON восстановлен");
 });
+$("import-button").addEventListener("click", importSelectedFile);
 $("generate").addEventListener("click", () => runGeneration(false));
 $("generate-json").addEventListener("click", () => runGeneration(true));
 $("check-connection").addEventListener("click", checkConnection);
