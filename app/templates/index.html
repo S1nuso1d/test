@@ -934,6 +934,13 @@ function resultMarkdown(data) {
   lines.push("", "## Замечания");
   lines.push(...(data.warnings || []).map(x => "- " + x));
   lines.push(...(data.validation_errors || []).map(x => "- " + x));
+  if ((data.fact_check_findings || []).length) {
+    lines.push("", "## Утверждения, требующие проверки");
+    for (const finding of data.fact_check_findings) {
+      lines.push("- [" + finding.severity + "] " + finding.field + " · "
+        + finding.category + ": " + finding.claim + " — " + finding.message);
+    }
+  }
   return lines.join("\n") + "\n";
 }
 
@@ -1140,7 +1147,8 @@ function renderBenchmark(data) {
         "Формат: " + (item.result.quality_score ?? "—") + "/100",
         "Попыток: " + (item.result.attempts || 0),
         "SEO-исправлений: " + (item.result.seo_repair_attempts || 0),
-        "SEO: " + Array.from(item.result.seo_description || "").length + " симв."
+        "SEO: " + Array.from(item.result.seo_description || "").length + " симв.",
+        "Утверждений на проверку: " + (item.result.fact_check_findings || []).length
       ]) {
         const metric = document.createElement("span");
         metric.className = "metric";
