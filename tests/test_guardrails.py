@@ -1,6 +1,9 @@
 from app.schemas import LLMProductCopy, ProductInput, SalesSection
 from app.services.guardrails import (
     build_characteristics,
+    build_safe_seo_description,
+    build_source_text,
+    calculate_quality_score,
     find_missing_data,
     find_unsupported_numbers,
     has_substantive_product_data,
@@ -148,3 +151,21 @@ def test_number_guard_checks_sales_audience_and_pitch() -> None:
     source = "Манометр DM 02. Диапазон измерений 0–1,6 МПа. Прибор для измерения давления."
     issues = validate_generated_copy(draft, source)
     assert any("25" in issue for issue in issues)
+
+
+
+def test_safe_seo_fallback_meets_length_and_uses_only_source_numbers() -> None:
+    from app.services.guardrails import find_unsupported_numbers
+
+    description = build_safe_seo_description(PRODUCT)
+    assert 800 <= len(description) <= 1200
+    assert find_unsupported_numbers(description, build_source_text(PRODUCT)) == []
+
+
+def test_formal_quality_score_is_not_a_semantic_accuracy_claim() -> None:
+    draft = _draft()
+    source = "Манометр DM 02. Диапазон 0–1,6 МПа."
+    assert calculate_quality_score(draft, source) == 100
+
+    short_draft = _draft(seo_description="Коротко")
+    assert calculate_quality_score(short_draft, source) < 100
