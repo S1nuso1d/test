@@ -1,6 +1,6 @@
 [project]
 name = "product-copy-ai"
-version = "0.4.1"
+version = "0.5.0"
 description = "Local AI assistant for drafting B2B product cards"
 requires-python = ">=3.11"
 dependencies = [
