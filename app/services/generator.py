@@ -164,7 +164,7 @@ async def generate_product_copy(
     fallback_used = False
     if seo_issues:
         repair_feedback = seo_issues
-        for repair_attempt in range(1, 3):
+        for _ in range(1, 3):
             try:
                 repaired_description = await client.repair_seo_description(
                     SEO_REPAIR_SYSTEM_PROMPT,
