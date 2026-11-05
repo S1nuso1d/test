@@ -117,6 +117,19 @@ def evaluate_result(product: dict[str, Any], result: dict[str, Any]) -> list[str
     return issues
 
 
+def assignment_examples_confirmed(
+    product_count: int,
+    result_count: int,
+    employer_data_confirmed: bool,
+) -> bool:
+    """Do not treat external demo data as the employer's second input."""
+    return (
+        product_count == REQUIRED_PRODUCT_COUNT
+        and result_count == REQUIRED_PRODUCT_COUNT
+        and employer_data_confirmed
+    )
+
+
 def _markdown_fallback(product: dict[str, Any], result: dict[str, Any]) -> str:
     sales = result.get("sales_section") or {}
     lines = [
@@ -152,6 +165,7 @@ def run_check(
     output_dir: Path,
     base_url: str,
     timeout_seconds: float,
+    employer_data_confirmed: bool = False,
 ) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     products: list[tuple[Path, dict[str, Any]]] = []
@@ -179,13 +193,16 @@ def run_check(
     for error in load_errors:
         report_lines.append(f"- Ошибка входного файла: {error}")
 
-    if len(products) < REQUIRED_PRODUCT_COUNT:
+    if len(products) < REQUIRED_PRODUCT_COUNT or not employer_data_confirmed:
         report_lines.extend([
             "## Комплектность примеров",
             "",
-            f"НЕ ЗАКРЫТО: для задания требуются два реальных товара, передано {len(products)}.",
-            "Не используйте синтетический демонстрационный товар как замену второму товару из задания.",
-            "Добавьте второй JSON, полученный от работодателя, и повторите запуск с двумя путями.",
+            f"Передано реальных записей для демонстрации: {len(products)} из {REQUIRED_PRODUCT_COUNT}.",
+            "Источник двух товаров из задания работодателя не подтверждён этим запуском.",
+            "Внешние демонстрационные образцы можно использовать для проверки функциональности, "
+            "но нельзя выдавать за исходные данные работодателя.",
+            "Флаг --confirm-assignment-products используйте только если оба JSON действительно "
+            "соответствуют товарам, предоставленным работодателем.",
             "",
         ])
 
@@ -265,9 +282,10 @@ def run_check(
         )
         return 2
 
-    all_products_pass = (
-        len(products) == REQUIRED_PRODUCT_COUNT
-        and len(results_summary) == REQUIRED_PRODUCT_COUNT
+    all_products_pass = assignment_examples_confirmed(
+        len(products),
+        len(results_summary),
+        employer_data_confirmed,
     )
     all_results_pass = all_products_pass and all(
         not item["issues"] for item in results_summary
@@ -277,14 +295,18 @@ def run_check(
         "",
         f"- Проверок пройдено без замечаний: "
         f"{sum(not item['issues'] for item in results_summary)} из {len(results_summary)}.",
-        f"- Примеры для двух товаров: "
-        f"{'есть' if len(products) == REQUIRED_PRODUCT_COUNT else 'не хватает'}.",
+        f"- Сгенерировано демонстрационных результатов: {len(results_summary)}.",
+        f"- Два товара подтверждены как исходные данные работодателя: "
+        f"{'да' if employer_data_confirmed else 'нет'}.",
         "- Решение о публикации карточки принимает человек после сверки с исходными документами.",
         "",
         (
             "**Автоматический комплект проверок пройден. Нужна финальная ручная редакторская проверка.**"
             if all_results_pass
-            else "**К отправке ещё не готово: устраните замечания и/или добавьте второй реальный товар.**"
+            else (
+                "**К отправке ещё не готово: устраните замечания, добавьте второй товар "
+                "и подтвердите, что оба входа получены от работодателя.**"
+            )
         ),
         "",
     ])
@@ -313,11 +335,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--timeout", type=float, default=360.0)
+    parser.add_argument(
+        "--confirm-assignment-products",
+        action="store_true",
+        help=(
+            "Подтвердить, что оба переданных JSON — именно товары из материалов работодателя. "
+            "Не указывайте для внешних демонстрационных примеров."
+        ),
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
     raise SystemExit(
-        run_check(args.products, args.output_dir, args.base_url, args.timeout)
+        run_check(
+            args.products,
+            args.output_dir,
+            args.base_url,
+            args.timeout,
+            employer_data_confirmed=args.confirm_assignment_products,
+        )
     )
