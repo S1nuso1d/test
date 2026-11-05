@@ -188,7 +188,7 @@ class LLMClient:
         try:
             async with client:
                 response = await client.chat(
-                    model=self.settings.ollama_model,
+                    model=self.model_name,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
