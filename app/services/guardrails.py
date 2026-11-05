@@ -177,7 +177,7 @@ def numbers_in(text: str) -> set[str]:
 def find_unsupported_numbers(generated_text: str, source_text: str) -> list[str]:
     """Detect numeric tokens in generated copy that do not occur in the input.
 
-    This conservative lexical check does not prove semantic correctness or validate units.
+    This conservative lexical check does not prove semantic correctness.
     """
     return sorted(numbers_in(generated_text) - numbers_in(source_text))
 
