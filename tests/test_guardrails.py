@@ -168,8 +168,6 @@ def test_number_guard_checks_sales_audience_and_pitch() -> None:
 
 
 def test_safe_seo_fallback_meets_length_and_uses_only_source_numbers() -> None:
-    from app.services.guardrails import find_unsupported_numbers
-
     product = ProductInput(
         name="Манометр показывающий DM 02",
         manufacturer="Манотомь",
