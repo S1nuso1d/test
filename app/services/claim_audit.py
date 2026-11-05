@@ -160,15 +160,90 @@ def audit_text_claims(
 
 
 
+
+# Specific aliases are checked before generic ones. In particular, temperature ranges
+# must not be mistaken for measurement ranges merely because both contain "диапазон".
 _SPEC_ALIAS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Диапазон измерений", ("диапазон измерений", "диапазон", "предел измерения")),
-    ("Класс точности", ("класс точности", "точность")),
-    ("Присоединение", ("присоединение", "резьба", "тип соединения")),
-    ("Диаметр корпуса", ("диаметр корпуса", "диаметр циферблата", "диаметр")),
-    ("Степень защиты", ("степень защиты", "защита ip", "ip")),
-    ("Напряжение питания", ("напряжение питания", "питание", "напряжение")),
-    ("Выходной сигнал", ("выходной сигнал", "сигнал выхода")),
-    ("Диапазон температуры", ("диапазон температуры", "температурный диапазон")),
+    (
+        "Диапазон температуры",
+        (
+            r"(?<!\w)диапазон(?:а|у|ом|е)?\s+температур\w*(?!\w)",
+            r"(?<!\w)температур\w*\s+диапазон(?:а|у|ом|е)?(?!\w)",
+        ),
+    ),
+    (
+        "Диапазон расхода",
+        (
+            r"(?<!\w)диапазон(?:а|у|ом|е)?\s+расход\w*(?!\w)",
+            r"(?<!\w)предел(?:а|у|ом|е)?\s+расход\w*(?!\w)",
+            r"(?<!\w)расход\w*\s+(?:в\s+)?диапазон\w*(?!\w)",
+            r"(?<!\w)flow\s+range(?!\w)",
+        ),
+    ),
+    (
+        "Диапазон измерений",
+        (
+            r"(?<!\w)диапазон(?:а|у|ом|е)?(?:\s+измерени\w*)?(?!\w)",
+            r"(?<!\w)предел(?:а|у|ом|е)?\s+измерени\w*(?!\w)",
+            r"(?<!\w)measurement\s+range(?!\w)",
+            r"(?<!\w)range(?!\w)",
+        ),
+    ),
+    (
+        "Класс точности",
+        (
+            r"(?<!\w)класс(?:а|у|ом|е)?\s+точност\w*(?!\w)",
+            r"(?<!\w)точност\w*(?!\w)",
+            r"(?<!\w)accuracy\s+class(?!\w)",
+            r"(?<!\w)accuracy(?!\w)",
+        ),
+    ),
+    (
+        "Присоединение",
+        (
+            r"(?<!\w)присоединени\w*(?!\w)",
+            r"(?<!\w)резьб\w*(?!\w)",
+            r"(?<!\w)тип\s+соединени\w*(?!\w)",
+            r"(?<!\w)connection(?!\w)",
+            r"(?<!\w)thread(?!\w)",
+        ),
+    ),
+    (
+        "Диаметр корпуса",
+        (
+            r"(?<!\w)диаметр\w*(?:\s+(?:корпус\w*|циферблат\w*))?(?!\w)",
+            r"(?<!\w)case\s+diameter(?!\w)",
+            r"(?<!\w)dial\s+diameter(?!\w)",
+            r"(?<!\w)diameter(?!\w)",
+        ),
+    ),
+    (
+        "Степень защиты",
+        (
+            r"(?<!\w)степен\w*\s+защит\w*(?!\w)",
+            r"(?<!\w)защит\w*\s+ip(?!\w)",
+            r"(?<!\w)ip(?!\w)",
+            r"(?<!\w)ingress\s+protection(?!\w)",
+        ),
+    ),
+    (
+        "Напряжение питания",
+        (
+            r"(?<!\w)напряжени\w*(?:\s+питани\w*)?(?!\w)",
+            r"(?<!\w)питани\w*(?!\w)",
+            r"(?<!\w)supply\s+voltage(?!\w)",
+            r"(?<!\w)power\s+supply(?!\w)",
+        ),
+    ),
+    (
+        "Выходной сигнал",
+        (
+            r"(?<!\w)выходн\w*\s+сигнал\w*(?!\w)",
+            r"(?<!\w)сигнал\w*\s+выход\w*(?!\w)",
+            r"(?<!\w)output\s+signal(?!\w)",
+            r"(?<!\w)output(?!\w)",
+        ),
+    ),
 )
 _SPEC_NUMBER_RE = re.compile(r"(?<![\w])\d+(?:[.,]\d+)?(?![\w])")
 _SPEC_UNIT_RE = re.compile(
@@ -199,18 +274,36 @@ def _normalized_pairs(text: str) -> set[tuple[str, str]]:
     }
 
 
-def _aliases_for_spec(key: str) -> tuple[str, ...]:
+def _aliases_for_spec(key: str) -> tuple[re.Pattern[str], ...]:
+    """Return whole-word patterns for a known characteristic, including inflections."""
+    for _label, expressions in _SPEC_ALIAS_GROUPS:
+        patterns = tuple(re.compile(expression, re.IGNORECASE) for expression in expressions)
+        if any(pattern.search(key) for pattern in patterns):
+            return patterns
+
     normalized = key.casefold().strip()
-    for _label, aliases in _SPEC_ALIAS_GROUPS:
-        if any(alias in normalized for alias in aliases):
-            return aliases
-    return (normalized,) if len(normalized) >= 3 else ()
+    if len(normalized) < 3:
+        return ()
+    return (re.compile(rf"(?<!\w){re.escape(normalized)}(?!\w)", re.IGNORECASE),)
 
 
-def _value_context(text: str, end: int) -> str:
-    tail = text[end : end + 180]
+def find_spec_labels(text: str, product: ProductInput) -> list[str]:
+    """Return supplied technical-field names explicitly mentioned in a text fragment."""
+    labels: list[str] = []
+    for key, raw_value in product.specs.items():
+        if raw_value is None or not str(raw_value).strip():
+            continue
+        if any(pattern.search(text) for pattern in _aliases_for_spec(key)):
+            labels.append(key)
+    return labels
+
+
+def _value_context(text: str, match: re.Match[str]) -> str:
+    """Keep the complete matched attribute name in the diagnostic context."""
+    tail = text[match.end() : match.end() + 180]
     stop = re.search(r"[.!?]\s+|[\n;]", tail)
-    return tail[: stop.start()] if stop else tail
+    value = tail[: stop.start()] if stop else tail
+    return (match.group(0) + value).strip()[:120]
 
 
 def audit_spec_value_mismatches(
@@ -220,7 +313,6 @@ def audit_spec_value_mismatches(
 ) -> list[FactCheckFinding]:
     """Check values near known attribute labels against the corresponding source spec."""
     findings: list[FactCheckFinding] = []
-    generated_folded = generated_text.casefold()
 
     for key, raw_value in product.specs.items():
         if raw_value is None or not str(raw_value).strip():
@@ -233,11 +325,9 @@ def audit_spec_value_mismatches(
             continue
 
         mismatch_context: str | None = None
-        for alias in aliases:
-            if not alias:
-                continue
-            for match in re.finditer(re.escape(alias), generated_folded):
-                context = _value_context(generated_text, match.end())
+        for pattern in aliases:
+            for match in pattern.finditer(generated_text):
+                context = _value_context(generated_text, match)
                 actual_numbers = _normalized_numbers(context)
                 actual_pairs = _normalized_pairs(context)
                 if not actual_numbers:
@@ -245,7 +335,7 @@ def audit_spec_value_mismatches(
                 numbers_match = expected_numbers.issubset(actual_numbers)
                 units_match = not expected_pairs or expected_pairs.issubset(actual_pairs)
                 if not numbers_match or not units_match:
-                    mismatch_context = context.strip()[:120]
+                    mismatch_context = context
                     break
             if mismatch_context:
                 break
