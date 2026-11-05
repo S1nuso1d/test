@@ -10,7 +10,7 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -168,7 +168,7 @@ def run_check(
     report_lines = [
         "# Отчёт проверки перед сдачей тестового задания",
         "",
-        f"- Дата запуска (UTC): {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+        f"- Дата запуска (UTC): {datetime.now(UTC).isoformat(timespec='seconds')}",
         f"- API: `{base_url}`",
         f"- Передано файлов товаров: {len(product_paths)}",
         f"- Успешно прочитано товаров: {len(products)}",
