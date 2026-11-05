@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.config import Settings
-from app.schemas import LLMProductCopy
+from app.schemas import LLMProductCopy, SEODescriptionOutput
 
 
 class LLMClientError(RuntimeError):
@@ -131,3 +131,38 @@ class LLMClient:
         if not reply:
             raise LLMClientError("Ollama доступен, но локальная модель вернула пустой ответ.")
         return reply
+
+
+    async def repair_seo_description(self, system_prompt: str, user_prompt: str) -> str:
+        """Repair only the SEO description using a dedicated one-field JSON schema."""
+        async_client, response_error = self._load_sdk()
+        client = self._create_client(async_client)
+
+        try:
+            async with client:
+                response = await client.chat(
+                    model=self.settings.ollama_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    format=SEODescriptionOutput.model_json_schema(),
+                    options={
+                        "temperature": 0.1,
+                        "num_ctx": self.settings.ollama_num_ctx,
+                        "num_predict": self.settings.ollama_num_predict,
+                    },
+                    stream=False,
+                    keep_alive=self.settings.ollama_keep_alive,
+                )
+        except Exception as exc:
+            self._raise_ollama_error(exc, response_error)
+            raise
+
+        try:
+            parsed = SEODescriptionOutput.model_validate_json(response.message.content)
+        except Exception as exc:
+            raise LLMClientError(
+                "Ollama вернул некорректный JSON при исправлении SEO-описания."
+            ) from exc
+        return parsed.seo_description.strip()
