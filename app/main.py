@@ -24,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI(
     title="Product Copy AI",
     description="Черновики B2B-карточек контрольно-измерительных приборов с помощью локальной LLM",
-    version="0.7.0",
+    version="0.8.0",
 )
 
 
@@ -35,7 +35,7 @@ async def index() -> FileResponse:
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.7.0"}
+    return {"status": "ok", "version": "0.8.0"}
 
 
 @app.get("/api/status")
