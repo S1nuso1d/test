@@ -94,6 +94,16 @@ class LLMProductCopy(BaseModel):
     sales_section: SalesSection
 
 
+class FactCheckFinding(BaseModel):
+    """A concrete product claim that was not found in the supplied source data."""
+
+    field: str
+    category: str
+    claim: str
+    severity: Literal["warning", "critical"]
+    message: str
+
+
 class GenerationResponse(BaseModel):
     status: Literal["generated", "needs_data", "needs_review"]
     product_name: str | None = None
@@ -108,6 +118,7 @@ class GenerationResponse(BaseModel):
     missing_data: MissingDataReport | None = None
     warnings: list[str] = Field(default_factory=list)
     validation_errors: list[str] = Field(default_factory=list)
+    fact_check_findings: list[FactCheckFinding] = Field(default_factory=list)
     attempts: int = 0
     seo_repair_attempts: int = Field(default=0, ge=0, le=2)
     quality_score: int | None = Field(default=None, ge=0, le=100)
