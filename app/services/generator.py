@@ -1,6 +1,7 @@
 from pydantic import ValidationError
 
 from app.config import Settings
+from app.services.claim_audit import audit_draft_claims
 from app.schemas import (
     GenerationResponse,
     LLMProductCopy,
@@ -61,7 +62,9 @@ def _to_response(
     seo_repair_attempts: int = 0,
     fallback_used: bool = False,
 ) -> GenerationResponse:
-    needs_review = bool(issues) or fallback_used
+    source_text = build_source_text(product)
+    fact_check_findings = audit_draft_claims(raw, source_text)
+    needs_review = bool(issues) or fallback_used or bool(fact_check_findings)
     warnings = ["Черновик требует проверки контент-менеджером перед публикацией."]
     if missing_data.fields or missing_data.empty_specs or missing_data.expected_specs:
         warnings.append(
@@ -86,7 +89,11 @@ def _to_response(
         )
 
     sales = raw.sales_section
-    source_text = build_source_text(product)
+    if fact_check_findings:
+        warnings.append(
+            f"Автоматическая проверка обнаружила {len(fact_check_findings)} утверждений, "
+            "которые не найдены во входных данных. Проверьте их по паспорту или удалите."
+        )
     return GenerationResponse(
         status="needs_review" if needs_review else "generated",
         product_name=product.name,
@@ -101,6 +108,7 @@ def _to_response(
         missing_data=missing_data,
         warnings=warnings,
         validation_errors=issues,
+        fact_check_findings=fact_check_findings,
         attempts=attempts,
         seo_repair_attempts=seo_repair_attempts,
         quality_score=calculate_quality_score(raw, source_text),
