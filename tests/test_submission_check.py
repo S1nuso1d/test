@@ -1,3 +1,7 @@
+import json
+from pathlib import Path
+
+from app.schemas import ProductInput
 from scripts.run_submission_check import assignment_examples_confirmed, evaluate_result
 
 
@@ -108,3 +112,30 @@ def test_two_employer_inputs_can_confirm_assignment_completeness():
 
 def test_assignment_stays_incomplete_without_two_successful_results():
     assert not assignment_examples_confirmed(2, 1, employer_data_confirmed=True)
+
+
+def test_external_oven_demo_product_is_valid_input():
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "product_owen_pd100i_external_demo.json"
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    product = ProductInput.model_validate(payload)
+
+    assert product.manufacturer == "ОВЕН"
+    assert product.category == "pressure_transmitter"
+    assert product.specs["Диапазон измерений"] == "0–1,6 МПа"
+    assert product.specs["Присоединение"] == "G1/2 A DIN 3852"
+    assert product.specs["Класс точности"].startswith("0,5")
+    assert product.specs["Выходной сигнал"].startswith("4–20 мА")
+
+
+def test_external_oven_demo_has_provenance_warning():
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "product_owen_pd100i_external_demo.json"
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert "не был предоставлен работодателем" in payload["description"]
