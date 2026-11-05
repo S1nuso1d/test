@@ -1,6 +1,8 @@
 import re
 from typing import Any
 
+from app.services.claim_audit import audit_draft_claims, audit_text_claims
+
 from app.schemas import (
     KeyCharacteristic,
     LLMProductCopy,
@@ -232,6 +234,13 @@ def validate_generated_copy(draft: LLMProductCopy, source_text: str) -> list[str
         issues.append(f"SEO-описание содержит {len(description)} символов; требуется 800–1200")
     if not 3 <= len(queries) <= 5:
         issues.append(f"Найдено {len(queries)} непустых поисковых запросов; требуется 3–5")
+
+    normalized_queries = [
+        " ".join(re.findall(r"[a-zа-яё0-9]+", item.casefold()))
+        for item in queries
+    ]
+    if len(normalized_queries) != len(set(normalized_queries)):
+        issues.append("В списке поисковых запросов есть повторы; оставьте 3–5 уникальных формулировок")
     if not any(item.strip() for item in sales.suitable_for):
         issues.append("В коммерческом блоке не указана целевая аудитория или необходимость её уточнить")
     if not any(item.strip() for item in sales.tasks_solved):
@@ -250,6 +259,11 @@ def validate_generated_copy(draft: LLMProductCopy, source_text: str) -> list[str
         issues.append(
             "Числовые значения связаны с неподтверждёнными единицами измерения: "
             + ", ".join(unsupported_units)
+        )
+    for finding in audit_draft_claims(draft, source_text):
+        issues.append(
+            f"{finding.field}: неподтверждённое утверждение «{finding.claim}». "
+            f"{finding.message}"
         )
     return issues
 
@@ -278,6 +292,11 @@ def validate_seo_description(description: str, source_text: str) -> list[str]:
         issues.append(
             "В SEO-описании указаны неподтверждённые сочетания числа и единицы измерения: "
             + ", ".join(unsupported_units)
+        )
+    for finding in audit_text_claims(cleaned, source_text, "SEO-описание"):
+        issues.append(
+            f"SEO-описание: неподтверждённое утверждение «{finding.claim}». "
+            f"{finding.message}"
         )
     return issues
 
@@ -417,8 +436,10 @@ def calculate_quality_score(draft: LLMProductCopy, source_text: str) -> int:
         score += 10
     if sales.pitch.strip():
         score += 10
-    if not find_unsupported_numbers(all_generated_text(draft), source_text) and not find_unsupported_unit_pairs(
-        all_generated_text(draft), source_text
-    ):
+    generated_text = all_generated_text(draft)
+    has_numeric_issues = bool(find_unsupported_numbers(generated_text, source_text))
+    has_unit_issues = bool(find_unsupported_unit_pairs(generated_text, source_text))
+    has_claim_issues = bool(audit_draft_claims(draft, source_text))
+    if not has_numeric_issues and not has_unit_issues and not has_claim_issues:
         score += 10
     return score
