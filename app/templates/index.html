@@ -147,6 +147,10 @@ function renderResult(data, parent = output) {
   const title = document.createElement('h3'); title.textContent = data.product_name || 'Товар без названия'; card.append(title);
   addField(card, 'SEO-заголовок', data.seo_title);
   addField(card, `SEO-описание (${(data.seo_description || '').length} символов)`, data.seo_description);
+  if (data.quality_score !== null && data.quality_score !== undefined) {
+    addField(card, 'Формальная оценка качества', String(data.quality_score) + '/100 · не оценивает фактическую достоверность');
+  }
+  addField(card, 'Попыток целевого исправления SEO', data.seo_repair_attempts || 0);
   addField(card, 'Ключевые характеристики', data.key_characteristics || []);
   addField(card, 'Поисковые запросы', data.seo_queries || []);
   addField(card, 'Коммерческий блок', data.commercial_block);
