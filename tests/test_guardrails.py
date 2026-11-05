@@ -157,9 +157,20 @@ def test_number_guard_checks_sales_audience_and_pitch() -> None:
 def test_safe_seo_fallback_meets_length_and_uses_only_source_numbers() -> None:
     from app.services.guardrails import find_unsupported_numbers
 
-    description = build_safe_seo_description(PRODUCT)
+    product = ProductInput(
+        name="Манометр показывающий DM 02",
+        manufacturer="Манотомь",
+        specs={
+            "диапазон измерений": "0–1,6 МПа",
+            "класс точности": "1,5",
+            "присоединение": "G1/2",
+            "диаметр корпуса": "100 мм",
+        },
+        description="Прибор предназначен для измерения избыточного давления.",
+    )
+    description = build_safe_seo_description(product)
     assert 800 <= len(description) <= 1200
-    assert find_unsupported_numbers(description, build_source_text(PRODUCT)) == []
+    assert find_unsupported_numbers(description, build_source_text(product)) == []
 
 
 def test_formal_quality_score_is_not_a_semantic_accuracy_claim() -> None:
