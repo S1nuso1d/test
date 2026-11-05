@@ -164,11 +164,12 @@ async def test_repair_seo_description_uses_one_field_schema(monkeypatch) -> None
     fake_module.ResponseError = type("ResponseError", (Exception,), {})
     monkeypatch.setitem(sys.modules, "ollama", fake_module)
 
-    result = await LLMClient(Settings(ollama_model="qwen2.5:14b")).repair_seo_description(
+    result = await LLMClient(Settings(ollama_model="qwen2.5:14b"), model_name="qwen3.5:9b").repair_seo_description(
         "repair system", "repair input"
     )
 
     assert result == expected.seo_description
+    assert calls["request"]["model"] == "qwen3.5:9b"
     assert calls["request"]["format"] == SEODescriptionOutput.model_json_schema()
     assert calls["request"]["messages"][0]["content"] == "repair system"
     assert calls["request"]["options"]["temperature"] == 0.1
