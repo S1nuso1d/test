@@ -123,9 +123,15 @@ def audit_text_claims(
             if key in seen:
                 continue
 
-            # Do not flag an explicit disclaimer such as "IP не указана".
-            prefix = generated_text[max(0, match.start() - 55) : match.start()].casefold()
-            if re.search(r"(?:не указано|не подтверждено|отсутствует|нет данных)[^.!?]{0,35}$", prefix):
+            # Do not flag a disclaimer or a buyer checklist as a positive product claim.
+            context = generated_text[
+                max(0, match.start() - 55) : min(len(generated_text), match.end() + 55)
+            ].casefold()
+            if re.search(
+                r"не указано|не указана|не подтверждено|не подтверждена|отсутствует|нет данных|"
+                r"уточните|проверьте|сверьте|запросите|подтвердите",
+                context,
+            ):
                 continue
 
             seen.add(key)
