@@ -61,7 +61,7 @@ def _to_response(
     seo_repair_attempts: int = 0,
     fallback_used: bool = False,
 ) -> GenerationResponse:
-    needs_review = bool(issues)
+    needs_review = bool(issues) or fallback_used
     warnings = ["Черновик требует проверки контент-менеджером перед публикацией."]
     if missing_data.fields or missing_data.empty_specs or missing_data.expected_specs:
         warnings.append(
@@ -71,7 +71,8 @@ def _to_response(
     if fallback_used:
         warnings.append(
             "SEO-описание сформировано резервным локальным шаблоном из исходных данных "
-            "и общих рекомендаций по проверке перед покупкой; проверьте стиль перед публикацией."
+            "и общих рекомендаций по проверке перед покупкой; это не полноценный SEO-текст модели."
+            " Обязательно отредактируйте его перед публикацией."
         )
     if needs_review:
         warnings.append(
@@ -98,6 +99,7 @@ def _to_response(
         attempts=attempts,
         seo_repair_attempts=seo_repair_attempts,
         quality_score=calculate_quality_score(raw, source_text),
+        seo_fallback_used=fallback_used,
     )
 
 
