@@ -73,3 +73,26 @@ def test_evaluate_result_rejects_technical_phrase_in_audience():
         "Кому подходит" in item
         for item in evaluate_result(make_product(), result)
     )
+
+
+def test_evaluate_result_requires_missing_data_marker():
+    product = make_product()
+    result = make_result()
+    result["missing_data"] = {"expected_specs": ["Степень защиты"]}
+    result["key_characteristics"].append(
+        {"name": "Степень защиты", "value": "данных нет"}
+    )
+    assert evaluate_result(product, result) == []
+
+
+def test_evaluate_result_rejects_missing_marker_omission():
+    product = make_product()
+    result = make_result()
+    result["missing_data"] = {"expected_specs": ["Степень защиты"]}
+    result["key_characteristics"].append(
+        {"name": "Степень защиты", "value": "IP65"}
+    )
+    assert any(
+        "данных нет" in issue
+        for issue in evaluate_result(product, result)
+    )
