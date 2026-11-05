@@ -1,3 +1,4 @@
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -116,6 +117,40 @@ class GenerationResponse(BaseModel):
 class BatchGenerationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     products: list[ProductInput] = Field(min_length=1, max_length=10)
+
+
+class ModelBenchmarkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    product: ProductInput
+    models: list[str] = Field(min_length=2, max_length=3)
+
+    @field_validator("models")
+    @classmethod
+    def validate_model_names(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        if any(
+            not name or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}", name)
+            for name in normalized
+        ):
+            raise ValueError("Укажите корректные имена моделей Ollama")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("Для сравнения выберите разные модели")
+        return normalized
+
+
+class ModelBenchmarkItem(BaseModel):
+    model: str
+    elapsed_seconds: float = Field(ge=0)
+    result: GenerationResponse | None = None
+    error: str | None = None
+
+
+class ModelBenchmarkResponse(BaseModel):
+    total: int
+    completed: int
+    failed: int
+    items: list[ModelBenchmarkItem]
 
 
 class BatchGenerationItem(BaseModel):
