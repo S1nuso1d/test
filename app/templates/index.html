@@ -322,17 +322,17 @@
           <div class="field-grid">
             <div class="field full">
               <label for="product-name">Название товара <span class="required">*</span></label>
-              <input class="control" id="product-name" type="text" placeholder="Например, Манометр DM 02" value="Манометр показывающий DM 02" required>
+              <input class="control" id="product-name" type="text" placeholder="Например, Манометр DM 02" required>
             </div>
             <div class="field">
               <label for="manufacturer">Производитель</label>
-              <input class="control" id="manufacturer" type="text" placeholder="Название производителя" value="Манотомь">
+              <input class="control" id="manufacturer" type="text" placeholder="Название производителя">
             </div>
             <div class="field">
               <label for="category">Категория</label>
               <select class="control" id="category">
                 <option value="">Определить автоматически</option>
-                <option value="pressure_gauge" selected>Манометр</option>
+                <option value="pressure_gauge">Манометр</option>
                 <option value="temperature_transmitter">Преобразователь температуры</option>
                 <option value="pressure_transmitter">Преобразователь давления</option>
                 <option value="temperature_sensor">Датчик температуры</option>
@@ -342,7 +342,7 @@
             </div>
             <div class="field full">
               <label for="description">Описание и назначение</label>
-              <textarea class="control" id="description" placeholder="Укажите назначение, особенности и область применения прибора.">Прибор предназначен для измерения избыточного давления.</textarea>
+              <textarea class="control" id="description" placeholder="Укажите назначение, особенности и область применения прибора."></textarea>
             </div>
           </div>
 
@@ -356,8 +356,8 @@
 
           <div class="form-actions">
             <div class="left">
-              <button class="button ghost small" type="button" id="reset">Сбросить</button>
-              <button class="button ghost small" type="button" id="load-example">Пример</button>
+              <button class="button ghost small" type="button" id="reset">Очистить</button>
+              <button class="button ghost small" type="button" id="load-example">Загрузить пример</button>
             </div>
             <button class="button primary" id="generate" type="button">Сгенерировать карточку <span aria-hidden="true">→</span></button>
           </div>
@@ -447,6 +447,14 @@ function addSpecRow(name = "", value = "") {
   remove.addEventListener("click", () => row.remove());
   row.append(key, val, remove);
   $("spec-list").append(row);
+}
+
+function clearForm() {
+  $("product-name").value = "";
+  $("manufacturer").value = "";
+  $("category").value = "";
+  $("description").value = "";
+  $("spec-list").replaceChildren();
 }
 
 function loadExample() {
@@ -952,8 +960,8 @@ $("form-tab").addEventListener("click", () => setMode("form"));
 $("json-tab").addEventListener("click", () => setMode("json"));
 $("add-spec").addEventListener("click", () => addSpecRow());
 $("reset").addEventListener("click", () => {
-  loadExample();
-  showToast("Форма сброшена");
+  clearForm();
+  showToast("Поля очищены");
 });
 $("load-example").addEventListener("click", () => {
   loadExample();
@@ -967,7 +975,7 @@ $("generate").addEventListener("click", () => runGeneration(false));
 $("generate-json").addEventListener("click", () => runGeneration(true));
 $("check-connection").addEventListener("click", checkConnection);
 
-loadExample();
+clearForm();
 refreshApiStatus();
 </script>
 </body>
