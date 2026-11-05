@@ -45,7 +45,7 @@ def test_catalog_import_skips_invalid_rows_and_keeps_valid_rows() -> None:
         "Название;Класс точности\n"
         "Манометр DM 02;1,5\n"
         ";0,5\n"
-    ).encode("utf-8")
+    ).encode()
 
     result = importers.parse_catalog_file("catalog.csv", content)
     assert result["imported_count"] == 1
