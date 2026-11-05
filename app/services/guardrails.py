@@ -1,7 +1,12 @@
 import re
 from typing import Any
 
-from app.services.claim_audit import audit_draft_claims, audit_spec_value_mismatches, audit_text_claims
+from app.services.claim_audit import (
+    audit_draft_claims,
+    audit_spec_value_mismatches,
+    audit_text_claims,
+    find_spec_labels,
+)
 
 from app.schemas import (
     KeyCharacteristic,
@@ -249,6 +254,16 @@ def validate_generated_copy(
         issues.append("В коммерческом блоке не указаны задачи или необходимость их уточнить")
     if not sales.pitch.strip():
         issues.append("В коммерческом блоке отсутствует краткий тезис для менеджера")
+
+    if product is not None:
+        for audience in sales.suitable_for:
+            spec_labels = find_spec_labels(audience, product)
+            if spec_labels:
+                issues.append(
+                    "Поле «Кому подходит» должно описывать тип покупателей или специалистов, "
+                    "а не технические характеристики. Перенесите параметр "
+                    f"«{spec_labels[0]}» в описание или характеристики."
+                )
 
     unsupported = find_unsupported_numbers(all_generated_text(draft), source_text)
     if unsupported:
