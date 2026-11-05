@@ -168,3 +168,37 @@ def test_benchmark_rejects_duplicate_or_invalid_model_names() -> None:
 
     assert duplicate.status_code == 422
     assert invalid.status_code == 422
+
+
+def test_benchmark_continues_after_one_model_fails(monkeypatch) -> None:
+    calls = []
+
+    async def fake_list_models(self):
+        return ["qwen3.5:9b", "qwen2.5:14b"]
+
+    async def fake_generate(product, settings, model_name=None):
+        calls.append(model_name)
+        if model_name == "qwen3.5:9b":
+            raise GenerationError("модель вернула некорректный ответ")
+        return _result(product)
+
+    monkeypatch.setattr("app.main.LLMClient.list_models", fake_list_models)
+    monkeypatch.setattr("app.main.generate_product_copy", fake_generate)
+    response = client.post(
+        "/api/benchmark",
+        json={
+            "product": {
+                "name": "Манометр DM 02",
+                "specs": {"диапазон": "0–1,6 МПа"},
+            },
+            "models": ["qwen3.5:9b", "qwen2.5:14b"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert calls == ["qwen3.5:9b", "qwen2.5:14b"]
+    assert payload["completed"] == 1
+    assert payload["failed"] == 1
+    assert payload["items"][0]["error"] == "модель вернула некорректный ответ"
+    assert payload["items"][1]["result"]["status"] == "generated"
