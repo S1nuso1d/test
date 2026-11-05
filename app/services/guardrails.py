@@ -1,0 +1,216 @@
+import re
+from typing import Any
+
+from app.schemas import (
+    KeyCharacteristic,
+    LLMProductCopy,
+    MissingDataReport,
+    ProductInput,
+)
+
+DATA_NOT_AVAILABLE = "данных нет"
+_NUMBER_PATTERN = re.compile(r"(?<![\w])\d+(?:[.,]\d+)?(?![\w])")
+
+# Expected fields are category-specific. This avoids asking for a power supply on
+# a purely mechanical pressure gauge, while still surfacing useful omissions.
+CATEGORY_RULES: dict[str, dict[str, tuple[str, ...]]] = {
+    "pressure_gauge": {
+        "Диапазон измерений": ("диапазон", "предел измерения", "measurement range", "range"),
+        "Класс точности": ("класс точности", "точность", "accuracy class", "accuracy"),
+        "Присоединение": ("присоединение", "резьб", "connection", "thread"),
+        "Диаметр корпуса": ("диаметр корпуса", "диаметр циферблата", "case diameter", "dial diameter"),
+    },
+    "temperature_transmitter": {
+        "Диапазон измерений": ("диапазон", "предел измерения", "measurement range", "range"),
+        "Тип входного датчика": ("тип датчика", "термосопротивлен", "термопар", "sensor type", "input sensor"),
+        "Выходной сигнал": ("выходной сигнал", "сигнал выхода", "output signal", "output"),
+        "Напряжение питания": ("питание", "напряжение", "supply voltage", "power supply"),
+        "Класс точности": ("класс точности", "точность", "accuracy class", "accuracy"),
+        "Степень защиты": ("степень защиты", "ip rating", "ingress protection"),
+    },
+    "temperature_sensor": {
+        "Диапазон измерений": ("диапазон", "предел измерения", "measurement range", "range"),
+        "Тип чувствительного элемента": ("тип датчика", "чувствительный элемент", "термопар", "термосопротивлен", "sensor type", "element"),
+        "Класс точности": ("класс точности", "точность", "accuracy class", "accuracy"),
+        "Присоединение": ("присоединение", "резьб", "connection", "thread"),
+    },
+    "pressure_transmitter": {
+        "Диапазон измерений": ("диапазон", "предел измерения", "measurement range", "range"),
+        "Класс точности": ("класс точности", "точность", "accuracy class", "accuracy"),
+        "Выходной сигнал": ("выходной сигнал", "сигнал выхода", "output signal", "output"),
+        "Напряжение питания": ("питание", "напряжение", "supply voltage", "power supply"),
+        "Присоединение": ("присоединение", "резьб", "connection", "thread"),
+        "Степень защиты": ("степень защиты", "ip rating", "ingress protection"),
+    },
+    "flow_meter": {
+        "Диапазон расхода": ("расход", "диапазон измерения", "flow range", "flow rate", "range"),
+        "Класс точности": ("класс точности", "точность", "accuracy class", "accuracy"),
+        "Присоединение": ("присоединение", "диаметр условного прохода", "connection", "nominal diameter"),
+        "Выходной сигнал": ("выходной сигнал", "сигнал выхода", "output signal", "output"),
+        "Напряжение питания": ("питание", "напряжение", "supply voltage", "power supply"),
+    },
+    "level_sensor": {
+        "Диапазон измерений": ("диапазон", "предел измерения", "measurement range", "range"),
+        "Принцип измерения": ("принцип измерения", "технология измерения", "measuring principle"),
+        "Выходной сигнал": ("выходной сигнал", "сигнал выхода", "output signal", "output"),
+        "Напряжение питания": ("питание", "напряжение", "supply voltage", "power supply"),
+        "Степень защиты": ("степень защиты", "ip rating", "ingress protection"),
+    },
+}
+
+CATEGORY_ALIASES = {
+    "pressure_gauge": ("pressure_gauge", "манометр", "pressure gauge"),
+    "temperature_transmitter": ("temperature_transmitter", "преобразователь температуры", "датчик температуры с выходом", "temperature transmitter"),
+    "temperature_sensor": ("temperature_sensor", "термопреобразователь", "термодатчик", "термометр", "temperature sensor", "thermometer"),
+    "pressure_transmitter": ("pressure_transmitter", "преобразователь давления", "датчик давления", "pressure transmitter"),
+    "flow_meter": ("flow_meter", "расходомер", "flow meter", "flowmeter"),
+    "level_sensor": ("level_sensor", "уровнемер", "датчик уровня", "level sensor"),
+}
+
+CATEGORY_LABELS = {
+    "pressure_gauge": "Манометр",
+    "temperature_transmitter": "Преобразователь температуры",
+    "temperature_sensor": "Датчик температуры",
+    "pressure_transmitter": "Преобразователь давления",
+    "flow_meter": "Расходомер",
+    "level_sensor": "Датчик уровня",
+    "generic": "Не определён",
+}
+
+
+def _stringify(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "да" if value else "нет"
+    return str(value)
+
+
+def detect_category(product: ProductInput) -> tuple[str, str]:
+    if product.category:
+        supplied = product.category.casefold().strip()
+        for category, aliases in CATEGORY_ALIASES.items():
+            if any(alias.casefold() in supplied for alias in aliases):
+                return category, "provided"
+        return "generic", "provided"
+
+    haystack = f"{product.name or ''} {product.description or ''}".casefold()
+    # More specific classes should be checked before generic temperature/pressure sensors.
+    for category in (
+        "pressure_gauge",
+        "temperature_transmitter",
+        "pressure_transmitter",
+        "temperature_sensor",
+        "flow_meter",
+        "level_sensor",
+    ):
+        if any(alias.casefold() in haystack for alias in CATEGORY_ALIASES[category]):
+            return category, "detected"
+    return "generic", "generic"
+
+
+def _has_spec(spec_keys: list[str], aliases: tuple[str, ...]) -> bool:
+    return any(alias.casefold() in key for key in spec_keys for alias in aliases)
+
+
+def find_missing_data(product: ProductInput) -> MissingDataReport:
+    category, category_source = detect_category(product)
+    fields = [name for name in ("name", "manufacturer", "description") if not getattr(product, name)]
+    all_spec_keys = [key.casefold() for key in product.specs]
+    empty_specs = [key for key, value in product.specs.items() if value is None or not str(value).strip()]
+    expected_specs = [
+        label
+        for label, aliases in CATEGORY_RULES.get(category, {}).items()
+        if not _has_spec(all_spec_keys, aliases)
+    ]
+    return MissingDataReport(
+        category=category,
+        category_source=category_source,
+        fields=fields,
+        empty_specs=empty_specs,
+        expected_specs=expected_specs,
+    )
+
+
+def find_missing_fields(product: ProductInput) -> list[str]:
+    """Compatibility-friendly flat list for API clients and the web UI."""
+    report = find_missing_data(product)
+    return report.fields + [f"specs.{key}" for key in report.empty_specs] + report.expected_specs
+
+
+def build_characteristics(product: ProductInput, missing: MissingDataReport | None = None) -> list[KeyCharacteristic]:
+    """Copy supplied specs verbatim and append category-relevant missing parameters."""
+    report = missing or find_missing_data(product)
+    rows = [
+        KeyCharacteristic(name=key, value=_stringify(value) or DATA_NOT_AVAILABLE)
+        for key, value in product.specs.items()
+    ]
+    existing = [key.casefold() for key in product.specs]
+    for label in report.expected_specs:
+        aliases = CATEGORY_RULES.get(report.category, {}).get(label, ())
+        if not _has_spec(existing, aliases):
+            rows.append(KeyCharacteristic(name=label, value=DATA_NOT_AVAILABLE))
+    if not rows:
+        rows.append(KeyCharacteristic(name="Технические характеристики", value=DATA_NOT_AVAILABLE))
+    return rows
+
+
+def build_source_text(product: ProductInput) -> str:
+    parts = [product.name or "", product.manufacturer or "", product.category or "", product.description or ""]
+    parts.extend(f"{key}: {_stringify(value)}" for key, value in product.specs.items())
+    return "\n".join(part for part in parts if part)
+
+
+def numbers_in(text: str) -> set[str]:
+    return {token.replace(",", ".") for token in _NUMBER_PATTERN.findall(text)}
+
+
+def find_unsupported_numbers(generated_text: str, source_text: str) -> list[str]:
+    """Detect numeric tokens in generated copy that do not occur in the input.
+
+    This conservative lexical check does not prove semantic correctness or validate units.
+    """
+    return sorted(numbers_in(generated_text) - numbers_in(source_text))
+
+
+def all_generated_text(draft: LLMProductCopy) -> str:
+    sales = draft.sales_section
+    pieces = [draft.seo_title, draft.seo_description, *draft.seo_queries]
+    pieces += [*sales.suitable_for, *sales.tasks_solved, sales.pitch]
+    return "\n".join(piece for piece in pieces if piece)
+
+
+def validate_generated_copy(draft: LLMProductCopy, source_text: str) -> list[str]:
+    issues: list[str] = []
+    title = draft.seo_title.strip()
+    description = draft.seo_description.strip()
+    queries = [item.strip() for item in draft.seo_queries if item and item.strip()]
+    sales = draft.sales_section
+
+    if not title:
+        issues.append("SEO-заголовок пустой")
+    elif len(title) > 70:
+        issues.append(f"SEO-заголовок содержит {len(title)} символов; максимум — 70")
+    if not 800 <= len(description) <= 1200:
+        issues.append(f"SEO-описание содержит {len(description)} символов; требуется 800–1200")
+    if not 3 <= len(queries) <= 5:
+        issues.append(f"Найдено {len(queries)} непустых поисковых запросов; требуется 3–5")
+    if not any(item.strip() for item in sales.suitable_for):
+        issues.append("В коммерческом блоке не указана целевая аудитория или необходимость её уточнить")
+    if not any(item.strip() for item in sales.tasks_solved):
+        issues.append("В коммерческом блоке не указаны задачи или необходимость их уточнить")
+    if not sales.pitch.strip():
+        issues.append("В коммерческом блоке отсутствует краткий тезис для менеджера")
+
+    unsupported = find_unsupported_numbers(all_generated_text(draft), source_text)
+    if unsupported:
+        issues.append(
+            "В сгенерированных полях обнаружены числовые значения, отсутствующие во входных данных: "
+            + ", ".join(unsupported)
+        )
+    return issues
+
+
+def has_substantive_product_data(product: ProductInput) -> bool:
+    has_specs = any(value is not None and str(value).strip() for value in product.specs.values())
+    return bool(product.name and (product.description or has_specs))

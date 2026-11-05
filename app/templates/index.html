@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Product Copy AI</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, Segoe UI, sans-serif; }
+    body { margin: 0; background: #f3f5f8; color: #172033; }
+    main { max-width: 1180px; margin: 34px auto; padding: 0 20px; }
+    .layout { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 20px; align-items: start; }
+    section { background: white; border: 1px solid #e1e6ee; border-radius: 14px; padding: 22px; box-shadow: 0 5px 20px #1720330a; min-width: 0; }
+    h1 { margin: 0 0 8px; font-size: 28px; } h2 { margin: 0 0 16px; font-size: 18px; }
+    p { color: #58657a; line-height: 1.5; }
+    textarea { width: 100%; min-height: 440px; box-sizing: border-box; resize: vertical; padding: 14px; border: 1px solid #cbd4e0; border-radius: 9px; font: 13px/1.5 Consolas, monospace; }
+    button { border: 0; border-radius: 9px; padding: 11px 16px; background: #245bdb; color: white; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #e9eef8; color: #23385f; } button:disabled { opacity: .55; cursor: wait; }
+    .actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+    .result { min-height: 120px; overflow-wrap: anywhere; line-height: 1.55; }
+    .muted { color: #7b8798; } .error { color: #b42318; }
+    .status { display: inline-block; padding: 5px 10px; border-radius: 20px; background: #edf2ff; color: #244da8; font-size: 12px; margin-bottom: 12px; }
+    .status.good { background: #ecfdf3; color: #067647; } .status.warn { background: #fff7e6; color: #9a6700; }
+    .field { margin: 16px 0; } .field strong { display: block; margin-bottom: 5px; }
+    .field-body { white-space: pre-wrap; } .connection { margin: 0 0 14px; padding: 10px 12px; border-radius: 8px; background: #f4f6fa; color: #475467; font-size: 13px; }
+    .connection.ok { background: #ecfdf3; color: #067647; } .connection.error { background: #fef3f2; color: #b42318; }
+    .notice { border-left: 3px solid #d99b22; padding: 8px 11px; background: #fffaf0; margin: 8px 0; font-size: 13px; }
+    .item { border: 1px solid #e5eaf1; border-radius: 10px; padding: 14px; margin: 12px 0; }
+    .item h3 { margin: 0 0 10px; font-size: 16px; } .small { font-size: 12px; color: #788397; }
+    @media (max-width: 850px) { .layout { grid-template-columns: 1fr; } main { margin-top: 20px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Product Copy AI</h1>
+  <p>Локальная генерация черновиков B2B-карточек через Ollama. Можно передать один товар или массив до 10 товаров. Технические характеристики копируются из источника.</p>
+  <div id="connection" class="connection">Загружаем настройки Ollama...</div>
+  <div class="actions" style="margin: 0 0 16px">
+    <button class="secondary" id="check-connection">Проверить подключение Ollama</button>
+  </div>
+  <div class="layout">
+    <section>
+      <h2>1. Данные товара (JSON)</h2>
+      <textarea id="payload" spellcheck="false">{
+  "name": "Манометр показывающий DM 02",
+  "manufacturer": "Манотомь",
+  "specs": {
+    "диапазон измерений": "0–1,6 МПа",
+    "класс точности": "1,5",
+    "присоединение": "G1/2",
+    "диаметр корпуса": "100 мм"
+  },
+  "description": "Прибор предназначен для измерения избыточного давления..."
+}</textarea>
+      <div class="actions">
+        <button id="generate">Сгенерировать карточку</button>
+        <button class="secondary" id="reset">Вернуть пример</button>
+      </div>
+      <p class="small">Для пакетной обработки передайте JSON-массив товаров. Локальная модель обрабатывает их последовательно. Неизвестные поля вызывают ошибку валидации.</p>
+    </section>
+    <section>
+      <h2>2. Результат</h2>
+      <div id="output" class="result muted">Результат появится здесь после генерации.</div>
+    </section>
+  </div>
+</main>
+<script>
+const initialPayload = document.getElementById('payload').value;
+const button = document.getElementById('generate');
+const output = document.getElementById('output');
+const connection = document.getElementById('connection');
+let lastResult = null;
+
+async function refreshApiStatus() {
+  try {
+    const response = await fetch('/api/status');
+    const data = await response.json();
+    connection.className = 'connection';
+    connection.textContent = `Провайдер: ${data.provider} · Модель: ${data.model} · Сервер: ${data.base_url} · Пакет: до ${data.max_batch_size}`;
+  } catch (error) {
+    connection.className = 'connection error';
+    connection.textContent = 'Не удалось получить статус приложения.';
+  }
+}
+
+document.getElementById('reset').addEventListener('click', () => {
+  document.getElementById('payload').value = initialPayload;
+});
+
+document.getElementById('check-connection').addEventListener('click', async (event) => {
+  const checkButton = event.currentTarget;
+  checkButton.disabled = true;
+  connection.className = 'connection';
+  connection.textContent = 'Отправляем короткий запрос в локальную модель Ollama...';
+  try {
+    const response = await fetch('/api/test-connection', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Не удалось проверить подключение.');
+    connection.className = 'connection ok';
+    connection.textContent = `Ollama подключён · ${data.model} · ответ модели: ${data.reply}`;
+  } catch (error) {
+    connection.className = 'connection error';
+    connection.textContent = `Ошибка подключения: ${error.message}`;
+  } finally {
+    checkButton.disabled = false;
+  }
+});
+
+button.addEventListener('click', async () => {
+  button.disabled = true;
+  output.className = 'result muted';
+  output.textContent = 'Генерация...';
+  lastResult = null;
+  try {
+    const payload = JSON.parse(document.getElementById('payload').value);
+    const isBatch = Array.isArray(payload);
+    const endpoint = isBatch ? '/api/generate/batch' : '/api/generate';
+    const body = isBatch ? { products: payload } : payload;
+    const response = await fetch(endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+    lastResult = data;
+    if (isBatch) renderBatch(data); else renderResult(data);
+  } catch (error) {
+    output.className = 'result error';
+    output.textContent = `Ошибка: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+function addField(parent, heading, value) {
+  if (value === null || value === undefined || value === '') return;
+  const wrapper = document.createElement('div'); wrapper.className = 'field';
+  const title = document.createElement('strong'); title.textContent = heading;
+  const body = document.createElement('div'); body.className = 'field-body';
+  body.textContent = Array.isArray(value) ? value.map(x => typeof x === 'string' ? `• ${x}` : `${x.name}: ${x.value}`).join('\n') : value;
+  wrapper.append(title, body); parent.append(wrapper);
+}
+
+function renderResult(data, parent = output) {
+  const card = document.createElement('div'); card.className = 'item';
+  const badge = document.createElement('span'); badge.className = 'status ' + (data.status === 'generated' ? 'good' : 'warn');
+  badge.textContent = data.status === 'generated' ? 'Проверки пройдены' : data.status === 'needs_review' ? 'Нужна ручная проверка' : 'Недостаточно данных';
+  card.append(badge);
+  const title = document.createElement('h3'); title.textContent = data.product_name || 'Товар без названия'; card.append(title);
+  addField(card, 'SEO-заголовок', data.seo_title);
+  addField(card, `SEO-описание (${(data.seo_description || '').length} символов)`, data.seo_description);
+  addField(card, 'Ключевые характеристики', data.key_characteristics || []);
+  addField(card, 'Поисковые запросы', data.seo_queries || []);
+  addField(card, 'Коммерческий блок', data.commercial_block);
+  if (data.missing_data) {
+    addField(card, `Недостающие характеристики · ${data.missing_data.category}`, [
+      ...(data.missing_data.fields || []).map(x => `Обязательное поле: ${x}`),
+      ...(data.missing_data.empty_specs || []).map(x => `Пустое значение: ${x}`),
+      ...(data.missing_data.expected_specs || []).map(x => `Ожидаемая характеристика: ${x}`)
+    ]);
+  } else addField(card, 'Недостающие поля', data.missing_fields || []);
+  addField(card, 'Предупреждения', data.warnings || []);
+  addField(card, 'Ошибки проверки', data.validation_errors || []);
+  const actions = document.createElement('div'); actions.className = 'actions';
+  actions.append(makeButton('Скопировать JSON', () => copyText(JSON.stringify(data, null, 2))));
+  actions.append(makeButton('Скачать JSON', () => downloadFile('product-copy.json', JSON.stringify(data, null, 2), 'application/json')));
+  actions.append(makeButton('Скачать Markdown', () => downloadFile('product-copy.md', resultMarkdown(data), 'text/markdown')));
+  card.append(actions); parent.append(card);
+}
+
+function renderBatch(data) {
+  output.className = 'result'; output.replaceChildren();
+  const summary = document.createElement('div'); summary.className = 'notice';
+  summary.textContent = `Обработано: ${data.total} · Успешно: ${data.succeeded} · Ошибок: ${data.failed}`;
+  output.append(summary);
+  for (const item of data.items) {
+    if (item.result) renderResult(item.result);
+    else {
+      const card = document.createElement('div'); card.className = 'item error';
+      card.textContent = `${item.index}. ${item.product_name || 'Товар'}: ${item.error}`; output.append(card);
+    }
+  }
+  const actions = document.createElement('div'); actions.className = 'actions';
+  actions.append(makeButton('Скачать весь пакет JSON', () => downloadFile('product-copy-batch.json', JSON.stringify(data, null, 2), 'application/json')));
+  actions.append(makeButton('Скачать весь пакет Markdown', () => downloadFile('product-copy-batch.md', data.items.filter(x => x.result).map(x => resultMarkdown(x.result)).join('\n---\n'), 'text/markdown')));
+  output.prepend(actions);
+}
+
+function resultMarkdown(data) {
+  const lines = [`# ${data.product_name || 'Товар'} — черновик`, '', '## SEO-заголовок', data.seo_title || '', '', `## SEO-описание (${(data.seo_description || '').length} символов)`, data.seo_description || '', '', '## Характеристики', '| Параметр | Значение |', '|---|---|'];
+  for (const row of data.key_characteristics || []) lines.push(`| ${row.name} | ${row.value} |`);
+  lines.push('', '## Поисковые запросы', ...(data.seo_queries || []).map(x => `- ${x}`), '', '## Коммерческий блок', data.commercial_block || '', '', `Статус: ${data.status}`, `Попыток: ${data.attempts || 0}`, '', '## Предупреждения', ...(data.warnings || []).map(x => `- ${x}`));
+  if (data.validation_errors?.length) lines.push('', '## Ошибки проверки', ...data.validation_errors.map(x => `- ${x}`));
+  return lines.join('\n') + '\n';
+}
+
+function makeButton(label, action) { const b = document.createElement('button'); b.className = 'secondary'; b.textContent = label; b.addEventListener('click', action); return b; }
+function copyText(value) { navigator.clipboard.writeText(value); }
+function downloadFile(name, value, type) { const blob = new Blob([value], { type: `${type};charset=utf-8` }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); }
+
+refreshApiStatus();
+</script>
+</body>
+</html>
