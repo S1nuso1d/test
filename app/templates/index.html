@@ -721,6 +721,7 @@ function addResultSection(parent, heading, value, options = {}) {
 function addDiagnostics(card, data) {
   const warnings = data.warnings || [];
   const errors = data.validation_errors || [];
+  const factFindings = data.fact_check_findings || [];
   const missing = [];
   if (data.missing_data) {
     missing.push(...(data.missing_data.fields || []).map(x => "Не заполнено: " + x));
@@ -729,12 +730,13 @@ function addDiagnostics(card, data) {
   } else {
     missing.push(...(data.missing_fields || []).map(x => "Не заполнено: " + x));
   }
-  if (!warnings.length && !errors.length && !missing.length) return;
+  if (!warnings.length && !errors.length && !missing.length && !factFindings.length) return;
 
   const details = document.createElement("details");
   details.className = "diagnostics";
+  details.open = factFindings.some(item => item.severity === "critical");
   const summary = document.createElement("summary");
-  summary.textContent = "Проверки и замечания (" + (warnings.length + errors.length + missing.length) + ")";
+  summary.textContent = "Проверки и замечания (" + (warnings.length + errors.length + missing.length + factFindings.length) + ")";
   details.append(summary);
   const list = document.createElement("div");
   list.className = "notice-list";
@@ -754,6 +756,14 @@ function addDiagnostics(card, data) {
     const item = document.createElement("div");
     item.className = "notice error";
     item.textContent = message;
+    list.append(item);
+  }
+  for (const finding of factFindings) {
+    const item = document.createElement("div");
+    item.className = finding.severity === "critical" ? "notice error" : "notice";
+    item.textContent = (finding.severity === "critical" ? "Критично · " : "Проверить · ")
+      + finding.field + " · " + finding.category + ": «" + finding.claim + "». "
+      + finding.message;
     list.append(item);
   }
   details.append(list);
