@@ -86,3 +86,85 @@ def test_batch_endpoint_continues_after_one_item_failure(monkeypatch) -> None:
     assert payload["failed"] == 1
     assert payload["items"][0]["error"] == "ошибка тестового генератора"
     assert payload["items"][1]["result"]["product_name"] == "Товар B"
+
+
+def test_models_endpoint_returns_installed_models(monkeypatch) -> None:
+    async def fake_list_models(self):
+        return ["qwen2.5:14b", "qwen3.5:9b"]
+
+    monkeypatch.setattr("app.main.LLMClient.list_models", fake_list_models)
+    response = client.get("/api/models")
+
+    assert response.status_code == 200
+    assert response.json()["models"] == ["qwen2.5:14b", "qwen3.5:9b"]
+
+
+def test_benchmark_endpoint_runs_selected_models_sequentially(monkeypatch) -> None:
+    calls = []
+
+    async def fake_list_models(self):
+        return ["qwen2.5:14b", "qwen3.5:9b"]
+
+    async def fake_generate(product, settings, model_name=None):
+        calls.append(model_name)
+        return _result(product)
+
+    monkeypatch.setattr("app.main.LLMClient.list_models", fake_list_models)
+    monkeypatch.setattr("app.main.generate_product_copy", fake_generate)
+    response = client.post(
+        "/api/benchmark",
+        json={
+            "product": {
+                "name": "Манометр DM 02",
+                "specs": {"диапазон": "0–1,6 МПа"},
+            },
+            "models": ["qwen3.5:9b", "qwen2.5:14b"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert calls == ["qwen3.5:9b", "qwen2.5:14b"]
+    assert payload["total"] == 2
+    assert payload["completed"] == 2
+    assert payload["failed"] == 0
+    assert payload["items"][0]["model"] == "qwen3.5:9b"
+    assert payload["items"][1]["result"]["status"] == "generated"
+    assert payload["items"][0]["elapsed_seconds"] >= 0
+
+
+def test_benchmark_rejects_models_that_are_not_installed(monkeypatch) -> None:
+    async def fake_list_models(self):
+        return ["qwen3.5:9b"]
+
+    monkeypatch.setattr("app.main.LLMClient.list_models", fake_list_models)
+    response = client.post(
+        "/api/benchmark",
+        json={
+            "product": {"name": "Товар", "specs": {"параметр": "значение"}},
+            "models": ["qwen3.5:9b", "qwen2.5:14b"],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "не установлены" in response.json()["detail"]
+
+
+def test_benchmark_rejects_duplicate_or_invalid_model_names() -> None:
+    duplicate = client.post(
+        "/api/benchmark",
+        json={
+            "product": {"name": "Товар", "specs": {"параметр": "значение"}},
+            "models": ["qwen3.5:9b", "qwen3.5:9b"],
+        },
+    )
+    invalid = client.post(
+        "/api/benchmark",
+        json={
+            "product": {"name": "Товар", "specs": {"параметр": "значение"}},
+            "models": ["qwen3.5:9b", "../../unexpected"],
+        },
+    )
+
+    assert duplicate.status_code == 422
+    assert invalid.status_code == 422
