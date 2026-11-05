@@ -62,6 +62,14 @@ class SalesSection(BaseModel):
     pitch: str = ""
 
 
+class SEODescriptionOutput(BaseModel):
+    """Structured response for a focused SEO-description repair."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seo_description: str
+
+
 class LLMProductCopy(BaseModel):
     """Structured response requested from Ollama; strict lengths are checked locally."""
 
@@ -88,6 +96,8 @@ class GenerationResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     validation_errors: list[str] = Field(default_factory=list)
     attempts: int = 0
+    seo_repair_attempts: int = Field(default=0, ge=0, le=2)
+    quality_score: int | None = Field(default=None, ge=0, le=100)
 
 
 class BatchGenerationRequest(BaseModel):
