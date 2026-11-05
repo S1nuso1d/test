@@ -1,6 +1,6 @@
-from app.schemas import LLMProductCopy
+from app.schemas import LLMProductCopy, ProductInput
 from app.services.guardrails import validate_generated_copy, validate_seo_description
-from app.services.claim_audit import audit_draft_claims, audit_text_claims
+from app.services.claim_audit import audit_draft_claims, audit_spec_value_mismatches, audit_text_claims
 
 
 def test_unprovided_explosion_protection_is_critical() -> None:
@@ -100,3 +100,43 @@ def test_seo_validator_does_not_flag_buyer_checklist_as_claim() -> None:
     )
     findings = audit_text_claims(description, "Манометр DM 02.", "SEO-описание")
     assert findings == []
+
+
+
+def test_ip_audit_rejects_a_different_code_when_source_has_one() -> None:
+    findings = audit_text_claims(
+        "Степень защиты прибора — IP54.",
+        "Степень защиты: IP65.",
+        "SEO-описание",
+    )
+    assert len(findings) == 1
+    assert findings[0].category == "Степень защиты IP"
+
+
+def test_spec_audit_detects_diameter_value_swap() -> None:
+    product = ProductInput(
+        name="Манометр DM 02",
+        specs={"Диаметр корпуса": "100 мм"},
+    )
+    findings = audit_spec_value_mismatches(
+        "Диаметр корпуса составляет 200 мм.",
+        product,
+        "SEO-описание",
+    )
+    assert len(findings) == 1
+    assert findings[0].severity == "critical"
+    assert "100 мм" in findings[0].message
+
+
+def test_spec_audit_detects_unit_substitution_for_same_number() -> None:
+    product = ProductInput(
+        name="Манометр DM 02",
+        specs={"Диапазон измерений": "0–1,6 МПа"},
+    )
+    findings = audit_spec_value_mismatches(
+        "Диапазон измерений: 0–1,6 бар.",
+        product,
+        "SEO-описание",
+    )
+    assert len(findings) == 1
+    assert "0–1,6 МПа" in findings[0].message
