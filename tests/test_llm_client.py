@@ -39,7 +39,9 @@ async def test_test_connection_uses_configured_local_model(monkeypatch) -> None:
     assert result == "OK"
     assert calls["client_kwargs"]["host"] == "http://127.0.0.1:11434"
     assert calls["request"]["model"] == "qwen2.5:14b"
-    assert calls["request"]["messages"][0]["content"] == "Ответь одним словом: OK"
+    assert calls["request"]["messages"][0]["content"] == "Reply with exactly: OK"
+    assert calls["request"]["think"] is False
+    assert calls["request"]["options"]["num_predict"] == 64
 
 
 @pytest.mark.asyncio
@@ -89,6 +91,7 @@ async def test_generate_json_uses_ollama_schema_format(monkeypatch) -> None:
     assert calls["request"]["format"] == LLMProductCopy.model_json_schema()
     assert calls["request"]["messages"][0]["content"] == "system rules"
     assert calls["request"]["stream"] is False
+    assert calls["request"]["think"] is False
 
 
 @pytest.mark.asyncio
@@ -169,3 +172,4 @@ async def test_repair_seo_description_uses_one_field_schema(monkeypatch) -> None
     assert calls["request"]["format"] == SEODescriptionOutput.model_json_schema()
     assert calls["request"]["messages"][0]["content"] == "repair system"
     assert calls["request"]["options"]["temperature"] == 0.1
+    assert calls["request"]["think"] is False
