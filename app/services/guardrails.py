@@ -1,7 +1,7 @@
 import re
 from typing import Any
 
-from app.services.claim_audit import audit_draft_claims, audit_text_claims
+from app.services.claim_audit import audit_draft_claims, audit_spec_value_mismatches, audit_text_claims
 
 from app.schemas import (
     KeyCharacteristic,
@@ -219,7 +219,9 @@ def all_generated_text(draft: LLMProductCopy) -> str:
     return "\n".join(piece for piece in pieces if piece)
 
 
-def validate_generated_copy(draft: LLMProductCopy, source_text: str) -> list[str]:
+def validate_generated_copy(
+    draft: LLMProductCopy, source_text: str, product: ProductInput | None = None
+) -> list[str]:
     issues: list[str] = []
     title = draft.seo_title.strip()
     description = draft.seo_description.strip()
@@ -260,7 +262,7 @@ def validate_generated_copy(draft: LLMProductCopy, source_text: str) -> list[str
             "Числовые значения связаны с неподтверждёнными единицами измерения: "
             + ", ".join(unsupported_units)
         )
-    for finding in audit_draft_claims(draft, source_text):
+    for finding in audit_draft_claims(draft, source_text, product):
         issues.append(
             f"{finding.field}: неподтверждённое утверждение «{finding.claim}». "
             f"{finding.message}"
@@ -273,7 +275,9 @@ def has_substantive_product_data(product: ProductInput) -> bool:
     return bool(product.name and (product.description or has_specs))
 
 
-def validate_seo_description(description: str, source_text: str) -> list[str]:
+def validate_seo_description(
+    description: str, source_text: str, product: ProductInput | None = None
+) -> list[str]:
     """Validate only the SEO description so it can be repaired independently."""
     issues: list[str] = []
     cleaned = description.strip()
@@ -298,6 +302,12 @@ def validate_seo_description(description: str, source_text: str) -> list[str]:
             f"SEO-описание: неподтверждённое утверждение «{finding.claim}». "
             f"{finding.message}"
         )
+    if product is not None:
+        for finding in audit_spec_value_mismatches(cleaned, product, "SEO-описание"):
+            issues.append(
+                f"SEO-описание: неподтверждённое значение «{finding.claim}». "
+                f"{finding.message}"
+            )
     return issues
 
 
@@ -416,7 +426,9 @@ def build_safe_seo_description(product: ProductInput) -> str:
     return result
 
 
-def calculate_quality_score(draft: LLMProductCopy, source_text: str) -> int:
+def calculate_quality_score(
+    draft: LLMProductCopy, source_text: str, product: ProductInput | None = None
+) -> int:
     """Return a formal checklist score; it is not a semantic truthfulness score."""
     score = 0
     title = draft.seo_title.strip()
@@ -443,7 +455,7 @@ def calculate_quality_score(draft: LLMProductCopy, source_text: str) -> int:
     generated_text = all_generated_text(draft)
     has_numeric_issues = bool(find_unsupported_numbers(generated_text, source_text))
     has_unit_issues = bool(find_unsupported_unit_pairs(generated_text, source_text))
-    has_claim_issues = bool(audit_draft_claims(draft, source_text))
+    has_claim_issues = bool(audit_draft_claims(draft, source_text, product))
     if not has_numeric_issues and not has_unit_issues and not has_claim_issues:
         score += 10
     return score
