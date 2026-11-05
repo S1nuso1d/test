@@ -10,6 +10,15 @@ from app.schemas import (
 
 DATA_NOT_AVAILABLE = "данных нет"
 _NUMBER_PATTERN = re.compile(r"(?<![\w])\d+(?:[.,]\d+)?(?![\w])")
+_NUMBER_UNIT_PATTERN = re.compile(
+    r"(?<![\w])(?P<number>\d+(?:[.,]\d+)?)\s*"
+    r"(?P<unit>°\s*[cс]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
+    r"мм|см|мкм|нм|км|м|ма|квт|вт|мв|кв|в|а|кг|мг|г|мл|л|"
+    r"кгц|мгц|ггц|гц|%|mpa|kpa|gpa|pa|bar|atm|mm|cm|um|nm|km|"
+    r"ma|kw|w|mv|kv|v|kg|mg|g|ml|l|khz|mhz|ghz|hz)"
+    r"(?![\w])",
+    re.IGNORECASE,
+)
 
 # Expected fields are category-specific. This avoids asking for a power supply on
 # a purely mechanical pressure gauge, while still surfacing useful omissions.
@@ -173,6 +182,34 @@ def find_unsupported_numbers(generated_text: str, source_text: str) -> list[str]
     return sorted(numbers_in(generated_text) - numbers_in(source_text))
 
 
+def _normalize_quantity_number(value: str) -> str:
+    return format(float(value.replace(",", ".")), ".12g")
+
+
+def _normalize_quantity_unit(value: str) -> str:
+    normalized = re.sub(r"\s+", "", value.casefold())
+    if normalized == "°с":
+        return "°c"
+    return normalized
+
+
+def find_unsupported_unit_pairs(generated_text: str, source_text: str) -> list[str]:
+    """Detect numeric values paired with units not present in the source.
+
+    This catches errors such as changing 1.6 MPa to 1.6 bar even though the
+    numeric token itself is present in the input.
+    """
+    def extract(text: str) -> set[tuple[str, str]]:
+        return {
+            (_normalize_quantity_number(match.group("number")),
+             _normalize_quantity_unit(match.group("unit")))
+            for match in _NUMBER_UNIT_PATTERN.finditer(text)
+        }
+
+    unsupported = extract(generated_text) - extract(source_text)
+    return [f"{number} {unit}" for number, unit in sorted(unsupported)]
+
+
 def all_generated_text(draft: LLMProductCopy) -> str:
     sales = draft.sales_section
     pieces = [draft.seo_title, draft.seo_description, *draft.seo_queries]
@@ -208,6 +245,12 @@ def validate_generated_copy(draft: LLMProductCopy, source_text: str) -> list[str
             "В сгенерированных полях обнаружены числовые значения, отсутствующие во входных данных: "
             + ", ".join(unsupported)
         )
+    unsupported_units = find_unsupported_unit_pairs(all_generated_text(draft), source_text)
+    if unsupported_units:
+        issues.append(
+            "Числовые значения связаны с неподтверждёнными единицами измерения: "
+            + ", ".join(unsupported_units)
+        )
     return issues
 
 
@@ -229,6 +272,12 @@ def validate_seo_description(description: str, source_text: str) -> list[str]:
         issues.append(
             "В SEO-описании есть числовые значения, отсутствующие во входных данных: "
             + ", ".join(unsupported)
+        )
+    unsupported_units = find_unsupported_unit_pairs(cleaned, source_text)
+    if unsupported_units:
+        issues.append(
+            "В SEO-описании указаны неподтверждённые сочетания числа и единицы измерения: "
+            + ", ".join(unsupported_units)
         )
     return issues
 
@@ -368,6 +417,8 @@ def calculate_quality_score(draft: LLMProductCopy, source_text: str) -> int:
         score += 10
     if sales.pitch.strip():
         score += 10
-    if not find_unsupported_numbers(all_generated_text(draft), source_text):
+    if not find_unsupported_numbers(all_generated_text(draft), source_text) and not find_unsupported_unit_pairs(
+        all_generated_text(draft), source_text
+    ):
         score += 10
     return score
