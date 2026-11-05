@@ -1,7 +1,7 @@
 from pathlib import Path
 from time import perf_counter
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from app.config import get_settings
@@ -9,7 +9,9 @@ from app.schemas import (
     BatchGenerationItem,
     BatchGenerationRequest,
     BatchGenerationResponse,
+    CatalogImportResponse,
     GenerationResponse,
+    PassportImportResponse,
     ModelBenchmarkItem,
     ModelBenchmarkRequest,
     ModelBenchmarkResponse,
@@ -18,6 +20,7 @@ from app.schemas import (
 from app.services.generator import GenerationError, generate_product_copy
 from app.services.llm_client import LLMClient, LLMClientError, LLMConfigurationError
 from app.services.render import to_markdown
+from app.services.importers import MAX_UPLOAD_BYTES, parse_catalog_file, parse_passport_pdf
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -121,6 +124,35 @@ async def benchmark_models(payload: ModelBenchmarkRequest) -> ModelBenchmarkResp
         failed=failed,
         items=items,
     )
+
+
+@app.post("/api/import/catalog", response_model=CatalogImportResponse)
+async def import_catalog(file: UploadFile = File(...)) -> CatalogImportResponse:
+    file_name = file.filename or "catalog.csv"
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    await file.close()
+    try:
+        payload = parse_catalog_file(file_name, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CatalogImportResponse(
+        imported_count=payload["imported_count"],
+        products=payload["products"],
+        warnings=payload["warnings"],
+        errors=payload["errors"],
+    )
+
+
+@app.post("/api/import/passport", response_model=PassportImportResponse)
+async def import_passport(file: UploadFile = File(...)) -> PassportImportResponse:
+    file_name = file.filename or "passport.pdf"
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    await file.close()
+    try:
+        payload = parse_passport_pdf(file_name, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PassportImportResponse(**payload)
 
 
 @app.post("/api/test-connection")
