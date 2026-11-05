@@ -27,7 +27,18 @@ def to_markdown(result: GenerationResponse) -> str:
     else:
         entries = result.missing_fields
     lines += [f"- {entry}" for entry in entries] or ["- Не обнаружены"]
-    lines += ["", "## Статус и предупреждения", f"Статус: **{result.status}**", f"Попыток генерации: {result.attempts}"]
+    lines += [
+        "",
+        "## Статус и предупреждения",
+        f"Статус: **{result.status}**",
+        f"Попыток полной генерации: {result.attempts}",
+        f"Попыток целевого исправления SEO: {result.seo_repair_attempts}",
+    ]
+    if result.quality_score is not None:
+        lines.append(
+            f"Формальная оценка: {result.quality_score}/100 "
+            "(проверяет формат и числовые значения, но не доказывает фактическую достоверность)"
+        )
     lines += [f"- {warning}" for warning in result.warnings]
     if result.validation_errors:
         lines += ["", "## Ошибки проверки"]
