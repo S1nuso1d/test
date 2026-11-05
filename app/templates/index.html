@@ -716,7 +716,7 @@ function renderResult(data, parent = output, showExport = true) {
   if (parent === output) {
     output.replaceChildren();
     output.className = "result-body";
-    resultCaption.textContent = data.status === "generated" ? "Карточка сформирована" :
+    resultCaption.textContent = data.status === "generated" ? "Черновик сформирован · проверьте перед публикацией" :
       data.status === "needs_data" ? "Нужно больше исходных данных" : "Черновик требует проверки";
   }
   const card = document.createElement("article");
@@ -727,7 +727,7 @@ function renderResult(data, parent = output, showExport = true) {
   title.textContent = data.product_name || "Товар без названия";
   const status = document.createElement("span");
   status.className = "status " + (data.status === "generated" ? "good" : data.status === "needs_review" ? "warn" : "bad");
-  status.textContent = data.status === "generated" ? "Проверки пройдены" :
+  status.textContent = data.status === "generated" ? "Форматные проверки пройдены" :
     data.status === "needs_review" ? "Нужна проверка" : "Нужны данные";
   top.append(title, status);
   card.append(top);
@@ -753,6 +753,13 @@ function renderResult(data, parent = output, showExport = true) {
     score.textContent = "Формат: " + data.quality_score + "/100";
     metrics.append(score);
   }
+  if (data.seo_fallback_used) {
+    const fallback = document.createElement("span");
+    fallback.className = "metric";
+    fallback.title = "SEO-описание создано локальным резервным шаблоном и требует редакторской правки.";
+    fallback.textContent = "SEO: резервный шаблон";
+    metrics.append(fallback);
+  }
   if (metrics.childNodes.length) card.append(metrics);
 
   const seoTitle = addResultSection(card, "SEO-заголовок", data.seo_title, { copyValue: data.seo_title });
@@ -760,9 +767,10 @@ function renderResult(data, parent = output, showExport = true) {
     copyValue: data.seo_description
   });
   if (descriptionSection) {
+    const descriptionLength = Array.from(data.seo_description || "").length;
     const count = document.createElement("div");
-    count.className = "char-count" + ((data.seo_description || "").length >= 800 && (data.seo_description || "").length <= 1200 ? " ok" : "");
-    count.textContent = (data.seo_description || "").length + " символов · ориентир 800–1200";
+    count.className = "char-count" + (descriptionLength >= 800 && descriptionLength <= 1200 ? " ok" : "");
+    count.textContent = descriptionLength + " символов · ориентир 800–1200";
     descriptionSection.append(count);
     descriptionSection.querySelector(".value").classList.add("seo-description");
   }
@@ -858,7 +866,8 @@ function resultMarkdown(data) {
     "|---|---|"
   ];
   for (const item of data.key_characteristics || []) {
-    lines.push("| " + String(item.name || "").replace(/\|/g, "\\|") + " | " + String(item.value || "").replace(/\|/g, "\\|") + " |");
+    const escapeCell = value => String(value ?? "").replace(/\r?\n/g, " ").replace(/\|/g, "\\|");
+    lines.push("| " + escapeCell(item.name || "") + " | " + escapeCell(item.value || "") + " |");
   }
   lines.push("", "## Поисковые запросы");
   lines.push(...(data.seo_queries || []).map(x => "- " + x));
