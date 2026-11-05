@@ -1,4 +1,4 @@
-from app.schemas import LLMProductCopy, ProductInput, SalesSection
+from app.schemas import LLMProductCopy, ProductInput
 from app.services.guardrails import (
     build_characteristics,
     build_safe_seo_description,
@@ -114,18 +114,6 @@ def test_number_guard_rejects_same_number_with_unsupported_unit() -> None:
     assert any("неподтверждённые сочетания" in issue for issue in issues)
 
 
-def test_number_guard_rejects_same_number_with_unsupported_unit() -> None:
-    source = "Диапазон измерений 0–1,6 МПа; диаметр корпуса 100 мм."
-    generated = "Диапазон измерений 0–1,6 бар; диаметр корпуса 100 мм."
-
-    assert find_unsupported_numbers(generated, source) == []
-    assert find_unsupported_unit_pairs(generated, source) == ["1.6 бар"]
-
-    description = ("Текст для проверки выбора измерительного прибора. " * 16) + " Диапазон 1,6 бар."
-    issues = validate_seo_description(description, source)
-    assert any("неподтверждённые сочетания" in issue for issue in issues)
-
-
 def _draft(**overrides) -> LLMProductCopy:
     description = "Текст описания без числовых значений, основанный на предоставленных фактах. " * 12
     data = {
@@ -149,14 +137,14 @@ def test_number_guard_checks_search_queries_and_sales_block_too() -> None:
         description="Манометр для измерения давления.",
     )
     draft = _draft(seo_queries=["манометр 25 бар", "манометр DM 02", "манометр давления"])
-    issues = validate_generated_copy(draft, "\n".join([product.name or "", product.description or "", "диапазон: 0–1,6 МПа"]))
+    issues = validate_generated_copy(draft, build_source_text(product))
     assert any("25" in issue for issue in issues)
 
 
 def test_validation_enforces_description_length_and_query_count() -> None:
     product = ProductInput(name="Манометр DM 02", specs={"range": "0–1,6 МПа"})
     draft = _draft(seo_description="Короткий текст", seo_queries=["только один запрос"])
-    issues = validate_generated_copy(draft, "Манометр DM 02 range 0–1,6 МПа")
+    issues = validate_generated_copy(draft, build_source_text(product))
     assert any("800–1200" in issue for issue in issues)
     assert any("3–5" in issue for issue in issues)
 
@@ -174,8 +162,7 @@ def test_number_guard_checks_sales_audience_and_pitch() -> None:
             "pitch": "Сверьте параметры с документацией.",
         }
     )
-    source = "Манометр DM 02. Диапазон измерений 0–1,6 МПа. Прибор для измерения давления."
-    issues = validate_generated_copy(draft, source)
+    issues = validate_generated_copy(draft, build_source_text(product))
     assert any("25" in issue for issue in issues)
 
 
