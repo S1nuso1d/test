@@ -84,6 +84,27 @@
     .button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible {
       outline: 3px solid rgba(87,87,216,.22); outline-offset: 2px;
     }
+    .benchmark-panel {
+      margin: 0 0 20px; padding: 18px 22px; border: 1px solid var(--line);
+      border-radius: 15px; background: rgba(255,255,255,.92); box-shadow: var(--shadow);
+    }
+    .benchmark-panel[hidden] { display: none; }
+    .benchmark-head {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 14px; margin-bottom: 15px;
+    }
+    .benchmark-head h2 { margin: 0; font-size: 15px; letter-spacing: -.02em; }
+    .benchmark-head p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .benchmark-grid {
+      display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto;
+      align-items: end; gap: 12px;
+    }
+    .benchmark-field label {
+      display: block; margin-bottom: 6px; color: #59657a; font-size: 11px; font-weight: 650;
+    }
+    .benchmark-help { margin: 10px 0 0; color: #8a95a7; font-size: 10px; }
+    .benchmark-model-title { margin: 0 0 8px; color: #536078; font-size: 12px; font-weight: 750; }
+    .benchmark-metrics { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 9px; }
     .workspace {
       display: grid; grid-template-columns: minmax(360px, .88fr) minmax(0, 1.12fr);
       gap: 20px; align-items: start;
@@ -270,6 +291,10 @@
       .top-actions { align-items: flex-end; flex-direction: column; gap: 7px; }
       .model-pill { max-width: 150px; min-height: 32px; font-size: 10px; }
       .top-actions .button { min-height: 34px; padding: 0 9px; font-size: 11px; }
+      .benchmark-panel { padding: 15px; }
+      .benchmark-head { align-items: flex-start; }
+      .benchmark-grid { grid-template-columns: 1fr; }
+      .benchmark-grid .button { width: 100%; }
       .panel-head { padding: 18px 16px 14px; }
       .panel-body, .result-body { padding: 0 16px 17px; }
       .tabs { margin: 0 16px 16px; }
@@ -301,8 +326,31 @@
           <span id="model-name">Загрузка модели…</span>
         </div>
         <button class="button secondary small" id="check-connection" type="button">Проверить модель</button>
+        <button class="button secondary small" id="open-benchmark" type="button">Сравнить модели</button>
       </div>
     </header>
+
+    <section class="benchmark-panel" id="benchmark-panel" aria-labelledby="benchmark-title" hidden>
+      <div class="benchmark-head">
+        <div>
+          <h2 id="benchmark-title">Сравнение локальных моделей</h2>
+          <p>Один товар, одинаковые требования, последовательный запуск. Сравнение не запускает модели одновременно.</p>
+        </div>
+        <button class="button ghost small" id="close-benchmark" type="button">Скрыть</button>
+      </div>
+      <div class="benchmark-grid">
+        <div class="benchmark-field">
+          <label for="benchmark-model-a">Первая модель</label>
+          <select class="control" id="benchmark-model-a"></select>
+        </div>
+        <div class="benchmark-field">
+          <label for="benchmark-model-b">Вторая модель</label>
+          <select class="control" id="benchmark-model-b"></select>
+        </div>
+        <button class="button primary" id="run-benchmark" type="button" disabled>Запустить сравнение</button>
+      </div>
+      <p class="benchmark-help" id="benchmark-help">Сравнение использует текущие данные товара из формы или JSON-режима.</p>
+    </section>
 
     <main class="workspace">
       <section class="panel" aria-labelledby="input-title">
@@ -929,6 +977,186 @@ function renderBatch(data) {
   output.prepend(toolbar);
 }
 
+async function openBenchmark() {
+  const panel = $("benchmark-panel");
+  const trigger = $("open-benchmark");
+  const help = $("benchmark-help");
+  const runButton = $("run-benchmark");
+  panel.hidden = false;
+  trigger.disabled = true;
+  help.textContent = "Получаем список установленных моделей Ollama…";
+  runButton.disabled = true;
+
+  try {
+    const response = await fetch("/api/models");
+    const data = await response.json();
+    if (!response.ok) {
+      const detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data);
+      throw new Error(detail || "Не удалось получить список моделей.");
+    }
+    const models = data.models || [];
+    if (models.length < 2) {
+      help.textContent = models.length
+        ? "Установлена только одна модель. Для сравнения загрузите ещё одну модель через ollama pull."
+        : "В Ollama пока нет загруженных моделей.";
+      $("benchmark-model-a").replaceChildren();
+      $("benchmark-model-b").replaceChildren();
+      return;
+    }
+
+    for (const id of ["benchmark-model-a", "benchmark-model-b"]) {
+      const select = $(id);
+      select.replaceChildren();
+      for (const model of models) {
+        const option = document.createElement("option");
+        option.value = model;
+        option.textContent = model;
+        select.append(option);
+      }
+    }
+
+    const preferredFirst = models.includes(data.selected) ? data.selected : models[0];
+    const preferredSecond = models.find(model => model !== preferredFirst && /qwen2\.5:14b/i.test(model))
+      || models.find(model => model !== preferredFirst)
+      || models[1];
+    $("benchmark-model-a").value = preferredFirst;
+    $("benchmark-model-b").value = preferredSecond;
+    runButton.disabled = false;
+    help.textContent = "Время измеряется от начала генерации до готового ответа. Первый запуск модели может включать загрузку весов в память.";
+  } catch (error) {
+    help.textContent = error.message || "Не удалось получить список моделей.";
+    showToast(help.textContent);
+  } finally {
+    trigger.disabled = false;
+    panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function readBenchmarkProduct() {
+  if (inputMode === "form") return buildFormPayload();
+  let payload;
+  try {
+    payload = JSON.parse($("payload-json").value);
+  } catch (error) {
+    throw new Error("Проверьте JSON: " + error.message);
+  }
+  if (Array.isArray(payload)) {
+    throw new Error("Для сравнения моделей нужен один JSON-объект, а не массив товаров.");
+  }
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Ожидается JSON-объект товара.");
+  }
+  return payload;
+}
+
+async function runBenchmark() {
+  const button = $("run-benchmark");
+  const models = [$("benchmark-model-a").value, $("benchmark-model-b").value];
+  if (!models[0] || !models[1] || models[0] === models[1]) {
+    showToast("Выберите две разные модели.");
+    return;
+  }
+
+  button.disabled = true;
+  const previousLabel = button.textContent;
+  button.textContent = "Сравниваем…";
+  lastResult = null;
+  setGenerating(true, "Модели обрабатывают один и тот же товар последовательно…");
+
+  try {
+    const product = readBenchmarkProduct();
+    const response = await fetch("/api/benchmark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product, models })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      const detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data);
+      throw new Error(detail || "Не удалось сравнить модели.");
+    }
+    lastResult = data;
+    renderBenchmark(data);
+  } catch (error) {
+    output.replaceChildren();
+    const box = document.createElement("div");
+    box.className = "error-box";
+    box.textContent = error.message || "Не удалось сравнить модели.";
+    output.append(box);
+    resultCaption.textContent = "Сравнение не выполнено";
+  } finally {
+    output.setAttribute("aria-busy", "false");
+    button.disabled = false;
+    button.textContent = previousLabel;
+  }
+}
+
+function renderBenchmark(data) {
+  output.replaceChildren();
+  output.className = "result-body";
+  resultCaption.textContent = "Сравнение моделей завершено";
+
+  const summary = document.createElement("div");
+  summary.className = "batch-summary";
+  const summaryText = document.createElement("div");
+  const heading = document.createElement("strong");
+  heading.textContent = "Сравнение завершено";
+  const sub = document.createElement("span");
+  sub.textContent = "Ответов: " + data.completed + " · Ошибок: " + data.failed;
+  summaryText.append(heading, sub);
+  const count = document.createElement("div");
+  count.className = "numbers";
+  count.textContent = data.total + " модели";
+  summary.append(summaryText, count);
+  output.append(summary);
+
+  for (const item of data.items || []) {
+    const container = document.createElement("section");
+    const title = document.createElement("h4");
+    title.className = "benchmark-model-title";
+    title.textContent = item.model;
+    container.append(title);
+
+    if (item.error) {
+      const error = document.createElement("div");
+      error.className = "error-box";
+      error.textContent = item.error;
+      container.append(error);
+    } else if (item.result) {
+      const metrics = document.createElement("div");
+      metrics.className = "benchmark-metrics";
+      for (const label of [
+        "Время: " + Number(item.elapsed_seconds).toFixed(2) + " с",
+        "Формат: " + (item.result.quality_score ?? "—") + "/100",
+        "Попыток: " + (item.result.attempts || 0),
+        "SEO-исправлений: " + (item.result.seo_repair_attempts || 0),
+        "SEO: " + Array.from(item.result.seo_description || "").length + " симв."
+      ]) {
+        const metric = document.createElement("span");
+        metric.className = "metric";
+        metric.textContent = label;
+        metrics.append(metric);
+      }
+      container.append(metrics);
+      renderResult(item.result, container, false);
+    }
+    output.append(container);
+  }
+
+  const markdown = (data.items || []).map(item => {
+    if (item.error) return "## " + item.model + "\n\nОшибка: " + item.error;
+    return "## " + item.model + "\n\nВремя: " + item.elapsed_seconds + " с\n\n" + resultMarkdown(item.result || {});
+  }).join("\n---\n");
+  const toolbar = document.createElement("div");
+  toolbar.className = "result-toolbar";
+  toolbar.append(
+    makeButton("Копировать JSON", () => copyText(JSON.stringify(data, null, 2))),
+    makeButton("Скачать JSON", () => downloadFile("model-benchmark.json", JSON.stringify(data, null, 2), "application/json")),
+    makeButton("Скачать отчёт", () => downloadFile("model-benchmark.md", markdown, "text/markdown"))
+  );
+  output.prepend(toolbar);
+}
+
 async function refreshApiStatus() {
   try {
     const response = await fetch("/api/status");
@@ -983,6 +1211,9 @@ $("reset-json").addEventListener("click", () => {
 $("generate").addEventListener("click", () => runGeneration(false));
 $("generate-json").addEventListener("click", () => runGeneration(true));
 $("check-connection").addEventListener("click", checkConnection);
+$("open-benchmark").addEventListener("click", openBenchmark);
+$("close-benchmark").addEventListener("click", () => $("benchmark-panel").hidden = true);
+$("run-benchmark").addEventListener("click", runBenchmark);
 
 clearForm();
 refreshApiStatus();
