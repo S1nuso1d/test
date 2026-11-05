@@ -1,4 +1,5 @@
 from pathlib import Path
+from time import perf_counter
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -9,6 +10,9 @@ from app.schemas import (
     BatchGenerationRequest,
     BatchGenerationResponse,
     GenerationResponse,
+    ModelBenchmarkItem,
+    ModelBenchmarkRequest,
+    ModelBenchmarkResponse,
     ProductInput,
 )
 from app.services.generator import GenerationError, generate_product_copy
@@ -43,6 +47,80 @@ async def api_status() -> dict[str, str | int]:
         "base_url": settings.ollama_base_url,
         "max_batch_size": 10,
     }
+
+
+@app.get("/api/models")
+async def list_ollama_models() -> dict[str, str | list[str]]:
+    settings = get_settings()
+    try:
+        return {
+            "selected": settings.ollama_model,
+            "models": await LLMClient(settings).list_models(),
+        }
+    except LLMConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LLMClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/benchmark", response_model=ModelBenchmarkResponse)
+async def benchmark_models(payload: ModelBenchmarkRequest) -> ModelBenchmarkResponse:
+    """Run the same product through selected local models sequentially."""
+    settings = get_settings()
+    try:
+        installed = await LLMClient(settings).list_models()
+    except LLMConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LLMClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    unavailable = [model for model in payload.models if model not in installed]
+    if unavailable:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Следующие модели не установлены в Ollama: "
+                + ", ".join(unavailable)
+                + ". Сначала загрузите их командой ollama pull."
+            ),
+        )
+
+    items: list[ModelBenchmarkItem] = []
+    completed = 0
+    failed = 0
+
+    for model in payload.models:
+        started = perf_counter()
+        try:
+            result = await generate_product_copy(
+                payload.product,
+                settings,
+                model_name=model,
+            )
+            items.append(
+                ModelBenchmarkItem(
+                    model=model,
+                    elapsed_seconds=round(perf_counter() - started, 2),
+                    result=result,
+                )
+            )
+            completed += 1
+        except (LLMConfigurationError, LLMClientError, GenerationError) as exc:
+            items.append(
+                ModelBenchmarkItem(
+                    model=model,
+                    elapsed_seconds=round(perf_counter() - started, 2),
+                    error=str(exc),
+                )
+            )
+            failed += 1
+
+    return ModelBenchmarkResponse(
+        total=len(items),
+        completed=completed,
+        failed=failed,
+        items=items,
+    )
 
 
 @app.post("/api/test-connection")
