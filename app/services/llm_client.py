@@ -81,6 +81,7 @@ class LLMClient:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
+                    think=False,
                     format=LLMProductCopy.model_json_schema(),
                     options={
                         "temperature": 0.2,
@@ -116,10 +117,11 @@ class LLMClient:
                     messages=[
                         {
                             "role": "user",
-                            "content": "Ответь одним словом: OK",
+                            "content": "Reply with exactly: OK",
                         }
                     ],
-                    options={"temperature": 0, "num_predict": 16},
+                    think=False,
+                    options={"temperature": 0, "num_predict": 64},
                     stream=False,
                     keep_alive=self.settings.ollama_keep_alive,
                 )
@@ -127,8 +129,15 @@ class LLMClient:
             self._raise_ollama_error(exc, response_error)
             raise
 
-        reply = (response.message.content or "").strip()
+        message = response.message
+        reply = (getattr(message, "content", None) or "").strip()
         if not reply:
+            thinking = (getattr(message, "thinking", None) or "").strip()
+            if thinking:
+                raise LLMClientError(
+                    "Ollama вернула только thinking без итогового ответа. "
+                    "Проверьте поддержку параметра think в пакете ollama."
+                )
             raise LLMClientError("Ollama доступен, но локальная модель вернула пустой ответ.")
         return reply
 
@@ -146,6 +155,7 @@ class LLMClient:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
+                    think=False,
                     format=SEODescriptionOutput.model_json_schema(),
                     options={
                         "temperature": 0.1,
