@@ -6,6 +6,8 @@ from app.services.guardrails import (
     calculate_quality_score,
     find_missing_data,
     find_unsupported_numbers,
+    find_unsupported_unit_pairs,
+    validate_seo_description,
     has_substantive_product_data,
     validate_generated_copy,
 )
@@ -98,6 +100,18 @@ def test_number_guard_accepts_decimal_comma_or_point() -> None:
         "Класс точности 1,5; диаметр 100 мм.",
     )
     assert unsupported == []
+
+
+def test_number_guard_rejects_same_number_with_unsupported_unit() -> None:
+    source = "Диапазон измерений 0–1,6 МПа; диаметр корпуса 100 мм."
+    generated = "Диапазон измерений 0–1,6 бар; диаметр корпуса 100 мм."
+
+    assert find_unsupported_numbers(generated, source) == []
+    assert find_unsupported_unit_pairs(generated, source) == ["1.6 бар"]
+
+    description = ("Текст для проверки выбора измерительного прибора. " * 16) + " Диапазон 1,6 бар."
+    issues = validate_seo_description(description, source)
+    assert any("неподтверждённые сочетания" in issue for issue in issues)
 
 
 def _draft(**overrides) -> LLMProductCopy:
