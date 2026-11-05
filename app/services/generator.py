@@ -63,7 +63,7 @@ def _to_response(
     fallback_used: bool = False,
 ) -> GenerationResponse:
     source_text = build_source_text(product)
-    fact_check_findings = audit_draft_claims(raw, source_text)
+    fact_check_findings = audit_draft_claims(raw, source_text, product)
     needs_review = bool(issues) or fallback_used or bool(fact_check_findings)
     warnings = ["Черновик требует проверки контент-менеджером перед публикацией."]
     if missing_data.fields or missing_data.empty_specs or missing_data.expected_specs:
@@ -111,7 +111,7 @@ def _to_response(
         fact_check_findings=fact_check_findings,
         attempts=attempts,
         seo_repair_attempts=seo_repair_attempts,
-        quality_score=calculate_quality_score(raw, source_text),
+        quality_score=calculate_quality_score(raw, source_text, product),
         seo_fallback_used=fallback_used,
     )
 
@@ -165,7 +165,7 @@ async def generate_product_copy(
             correction = _validation_feedback(issues, attempt)
             continue
 
-        issues = validate_generated_copy(draft, source_text)
+        issues = validate_generated_copy(draft, source_text, product)
         best_draft, best_issues = draft, issues
         if not issues:
             return _to_response(product, draft, missing_data, [], attempt)
@@ -175,7 +175,7 @@ async def generate_product_copy(
         raise GenerationError("Ollama не вернул ни одного структурно корректного черновика.")
 
     # If the only remaining field-level problem is SEO length/content, repair that field alone.
-    seo_issues = validate_seo_description(best_draft.seo_description, source_text)
+    seo_issues = validate_seo_description(best_draft.seo_description, source_text, product)
     seo_repair_attempts = 0
     fallback_used = False
     if seo_issues:
@@ -198,7 +198,7 @@ async def generate_product_copy(
             candidate = best_draft.model_copy(
                 update={"seo_description": repaired_description}
             )
-            repair_feedback = validate_seo_description(candidate.seo_description, source_text)
+            repair_feedback = validate_seo_description(candidate.seo_description, source_text, product)
             best_draft = candidate
             if not repair_feedback:
                 break
@@ -206,7 +206,7 @@ async def generate_product_copy(
         if validate_seo_description(best_draft.seo_description, source_text):
             try:
                 fallback_description = build_safe_seo_description(product)
-                fallback_issues = validate_seo_description(fallback_description, source_text)
+                fallback_issues = validate_seo_description(fallback_description, source_text, product)
                 if not fallback_issues:
                     best_draft = best_draft.model_copy(
                         update={"seo_description": fallback_description}
@@ -216,7 +216,7 @@ async def generate_product_copy(
                 # Keep the best LLM draft and return it as needs_review below.
                 pass
 
-        best_issues = validate_generated_copy(best_draft, source_text)
+        best_issues = validate_generated_copy(best_draft, source_text, product)
 
     if not best_issues:
         return _to_response(
