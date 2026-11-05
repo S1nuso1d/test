@@ -8,16 +8,23 @@ from app.schemas import (
     SalesSection,
 )
 from app.services.guardrails import (
-    all_generated_text,
     build_characteristics,
+    build_safe_seo_description,
     build_source_text,
+    calculate_quality_score,
     find_missing_data,
     find_missing_fields,
     has_substantive_product_data,
     validate_generated_copy,
+    validate_seo_description,
 )
-from app.services.llm_client import LLMClient
-from app.services.prompts import SYSTEM_PROMPT, build_user_prompt
+from app.services.llm_client import LLMClient, LLMClientError
+from app.services.prompts import (
+    SEO_REPAIR_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    build_seo_repair_prompt,
+    build_user_prompt,
+)
 
 
 class GenerationError(RuntimeError):
@@ -38,8 +45,9 @@ def _validation_feedback(issues: list[str], attempt: int) -> str:
     return (
         f"Попытка {attempt} из 3 не прошла локальную проверку. Исправь перечисленные ошибки. "
         "Проверь длину текста самостоятельно; не заполняй объём повторениями и не добавляй "
-        "неподтверждённые характеристики. Если исходных фактов недостаточно для честного "
-        "описания, прямо скажи об этом, даже если текст не достигнет требуемой длины.\n- "
+        "неподтверждённые характеристики. Если исходных фактов мало, используй нейтральные "
+        "рекомендации покупателю по проверке параметров и документов, не описывая их как свойства "
+        "товара.\n- "
         + "\n- ".join(issues)
     )
 
@@ -50,6 +58,8 @@ def _to_response(
     missing_data,
     issues: list[str],
     attempts: int,
+    seo_repair_attempts: int = 0,
+    fallback_used: bool = False,
 ) -> GenerationResponse:
     needs_review = bool(issues)
     warnings = ["Черновик требует проверки контент-менеджером перед публикацией."]
@@ -58,13 +68,19 @@ def _to_response(
             "В исходных данных отсутствуют некоторые поля или ожидаемые характеристики; "
             "проверьте, применимы ли они к этой модели, и запросите недостающие сведения."
         )
+    if fallback_used:
+        warnings.append(
+            "SEO-описание сформировано резервным локальным шаблоном из исходных данных "
+            "и общих рекомендаций по проверке перед покупкой; проверьте стиль перед публикацией."
+        )
     if needs_review:
         warnings.append(
-            "После трёх попыток остались нарушения формальных требований. Карточка сохранена "
+            "После повторных попыток остались нарушения формальных требований. Карточка сохранена "
             "как черновик для ручной проверки и не должна считаться готовой к публикации."
         )
 
     sales = raw.sales_section
+    source_text = build_source_text(product)
     return GenerationResponse(
         status="needs_review" if needs_review else "generated",
         product_name=product.name,
@@ -80,6 +96,8 @@ def _to_response(
         warnings=warnings,
         validation_errors=issues,
         attempts=attempts,
+        seo_repair_attempts=seo_repair_attempts,
+        quality_score=calculate_quality_score(raw, source_text),
     )
 
 
@@ -101,6 +119,7 @@ async def generate_product_copy(
                 "содержательное описание или техническую характеристику."
             ],
             attempts=0,
+            quality_score=0,
         )
 
     client = LLMClient(settings)
@@ -110,6 +129,7 @@ async def generate_product_copy(
     best_issues: list[str] = []
     max_attempts = 3
 
+    # First, keep the full-card correction loop. It handles schema, title, query and sales errors.
     for attempt in range(1, max_attempts + 1):
         raw_result = await client.generate_json(
             SYSTEM_PROMPT,
@@ -123,7 +143,6 @@ async def generate_product_copy(
                 for item in exc.errors(include_url=False)[:5]
             ]
             if attempt == max_attempts:
-                # If required structure is missing, do not fabricate a response object.
                 raise GenerationError(
                     f"Ollama {max_attempts} раза вернул некорректную структуру: " + "; ".join(issues)
                 ) from exc
@@ -136,5 +155,70 @@ async def generate_product_copy(
             return _to_response(product, draft, missing_data, [], attempt)
         correction = _validation_feedback(issues, attempt)
 
-    assert best_draft is not None
-    return _to_response(product, best_draft, missing_data, best_issues, max_attempts)
+    if best_draft is None:
+        raise GenerationError("Ollama не вернул ни одного структурно корректного черновика.")
+
+    # If the only remaining field-level problem is SEO length/content, repair that field alone.
+    seo_issues = validate_seo_description(best_draft.seo_description, source_text)
+    seo_repair_attempts = 0
+    fallback_used = False
+    if seo_issues:
+        repair_feedback = seo_issues
+        for repair_attempt in range(1, 3):
+            try:
+                repaired_description = await client.repair_seo_description(
+                    SEO_REPAIR_SYSTEM_PROMPT,
+                    build_seo_repair_prompt(
+                        product,
+                        best_draft.seo_description,
+                        repair_feedback,
+                    ),
+                )
+                seo_repair_attempts += 1
+            except LLMClientError:
+                # A failed focused call must not discard the usable draft; try the deterministic fallback.
+                break
+
+            candidate = best_draft.model_copy(
+                update={"seo_description": repaired_description}
+            )
+            repair_feedback = validate_seo_description(candidate.seo_description, source_text)
+            best_draft = candidate
+            if not repair_feedback:
+                break
+
+        if validate_seo_description(best_draft.seo_description, source_text):
+            try:
+                fallback_description = build_safe_seo_description(product)
+                fallback_issues = validate_seo_description(fallback_description, source_text)
+                if not fallback_issues:
+                    best_draft = best_draft.model_copy(
+                        update={"seo_description": fallback_description}
+                    )
+                    fallback_used = True
+            except ValueError:
+                # Keep the best LLM draft and return it as needs_review below.
+                pass
+
+        best_issues = validate_generated_copy(best_draft, source_text)
+
+    if not best_issues:
+        return _to_response(
+            product,
+            best_draft,
+            missing_data,
+            [],
+            max_attempts,
+            seo_repair_attempts=seo_repair_attempts,
+            fallback_used=fallback_used,
+        )
+
+    return _to_response(
+        product,
+        best_draft,
+        missing_data,
+        best_issues,
+        max_attempts,
+        seo_repair_attempts=seo_repair_attempts,
+        fallback_used=fallback_used,
+    )
