@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     )
 
     ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen2.5:14b"
+    ollama_model: str = "qwen3.5:9b"
     ollama_timeout_seconds: float = Field(default=300, gt=0, le=900)
     ollama_num_ctx: int = Field(default=8192, ge=2048, le=32768)
     ollama_num_predict: int = Field(default=2200, ge=256, le=8192)
