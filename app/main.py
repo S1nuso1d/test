@@ -1,5 +1,6 @@
+import json
 from pathlib import Path
-from time import perf_counter
+from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -12,9 +13,6 @@ from app.schemas import (
     CatalogImportResponse,
     GenerationResponse,
     PassportImportResponse,
-    ModelBenchmarkItem,
-    ModelBenchmarkRequest,
-    ModelBenchmarkResponse,
     ProductInput,
 )
 from app.services.generator import GenerationError, generate_product_copy
@@ -23,6 +21,36 @@ from app.services.render import to_markdown
 from app.services.importers import MAX_UPLOAD_BYTES, parse_catalog_file, parse_passport_pdf
 
 BASE_DIR = Path(__file__).resolve().parent
+
+EXAMPLE_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": "dm02",
+        "title": "Манометр DM 02",
+        "description": "Манометр · исходный пример из тестового задания",
+        "files": ["product_dm_02.json"],
+    },
+    {
+        "id": "dts024",
+        "title": "ОВЕН ДТС024-100П.В3.30/1",
+        "description": "Термопреобразователь сопротивления · СОЮЗ-ПРИБОР",
+        "files": ["product_oven_dts024_100p_v3_30_1.json"],
+    },
+    {
+        "id": "pd100",
+        "title": "ОВЕН ПД100-ДИ4,0-185-0,5",
+        "description": "Преобразователь давления · СОЮЗ-ПРИБОР",
+        "files": ["product_oven_pd100_di4_0_185_0_5.json"],
+    },
+    {
+        "id": "assignment_pair",
+        "title": "Два товара из тестового задания",
+        "description": "Пакетная обработка · термопреобразователь + преобразователь давления",
+        "files": [
+            "product_oven_dts024_100p_v3_30_1.json",
+            "product_oven_pd100_di4_0_185_0_5.json",
+        ],
+    },
+]
 
 app = FastAPI(
     title="Product Copy AI",
@@ -52,78 +80,27 @@ async def api_status() -> dict[str, str | int]:
     }
 
 
-@app.get("/api/models")
-async def list_ollama_models() -> dict[str, str | list[str]]:
-    settings = get_settings()
-    try:
-        return {
-            "selected": settings.ollama_model,
-            "models": await LLMClient(settings).list_models(),
-        }
-    except LLMConfigurationError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except LLMClientError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+@app.get("/api/examples")
+async def list_examples() -> dict[str, list[dict[str, Any]]]:
+    """Return curated single-product and batch examples for the web UI."""
+    examples_dir = BASE_DIR.parent / "examples"
+    examples: list[dict[str, Any]] = []
 
-
-@app.post("/api/benchmark", response_model=ModelBenchmarkResponse)
-async def benchmark_models(payload: ModelBenchmarkRequest) -> ModelBenchmarkResponse:
-    """Run the same product through selected local models sequentially."""
-    settings = get_settings()
-    try:
-        installed = await LLMClient(settings).list_models()
-    except LLMConfigurationError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except LLMClientError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    unavailable = [model for model in payload.models if model not in installed]
-    if unavailable:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Следующие модели не установлены в Ollama: "
-                + ", ".join(unavailable)
-                + ". Сначала загрузите их командой ollama pull."
-            ),
+    for item in EXAMPLE_CATALOG:
+        products = [
+            json.loads((examples_dir / filename).read_text(encoding="utf-8"))
+            for filename in item["files"]
+        ]
+        examples.append(
+            {
+                "id": item["id"],
+                "title": item["title"],
+                "description": item["description"],
+                "products": products,
+            }
         )
 
-    items: list[ModelBenchmarkItem] = []
-    completed = 0
-    failed = 0
-
-    for model in payload.models:
-        started = perf_counter()
-        try:
-            result = await generate_product_copy(
-                payload.product,
-                settings,
-                model_name=model,
-            )
-            items.append(
-                ModelBenchmarkItem(
-                    model=model,
-                    elapsed_seconds=round(perf_counter() - started, 2),
-                    result=result,
-                )
-            )
-            completed += 1
-        except (LLMConfigurationError, LLMClientError, GenerationError) as exc:
-            items.append(
-                ModelBenchmarkItem(
-                    model=model,
-                    elapsed_seconds=round(perf_counter() - started, 2),
-                    error=str(exc),
-                )
-            )
-            failed += 1
-
-    return ModelBenchmarkResponse(
-        total=len(items),
-        completed=completed,
-        failed=failed,
-        items=items,
-    )
+    return {"examples": examples}
 
 
 @app.post("/api/import/catalog", response_model=CatalogImportResponse)
