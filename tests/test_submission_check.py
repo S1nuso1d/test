@@ -1,4 +1,3 @@
-from app.schemas import ProductInput
 from scripts.run_submission_check import assignment_examples_confirmed, evaluate_result
 
 
