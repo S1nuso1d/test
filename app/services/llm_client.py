@@ -15,9 +15,9 @@ class LLMConfigurationError(LLMClientError):
 class LLMClient:
     """Async client for a local Ollama server with schema-constrained JSON output."""
 
-    def __init__(self, settings: Settings, model_name: str | None = None) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.model_name = model_name or settings.ollama_model
+        self.model_name = settings.ollama_model
 
     @staticmethod
     def _load_sdk() -> tuple[Any, type[Exception]]:
@@ -105,43 +105,6 @@ class LLMClient:
                 "по ожидаемой схеме. Повторите генерацию."
             ) from exc
         return parsed.model_dump()
-
-    async def list_models(self) -> list[str]:
-        """Return model names installed in the configured local Ollama instance."""
-        try:
-            import httpx
-        except ImportError as exc:  # pragma: no cover - httpx is a project dependency
-            raise LLMConfigurationError(
-                "Не установлен пакет httpx. Выполните: pip install -e ."
-            ) from exc
-
-        url = self.settings.ollama_base_url.rstrip("/") + "/api/tags"
-        try:
-            async with httpx.AsyncClient(
-                timeout=min(self.settings.ollama_timeout_seconds, 15.0)
-            ) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                payload = response.json()
-        except httpx.TimeoutException as exc:
-            raise LLMClientError("Не удалось получить список моделей Ollama: превышено время ожидания.") from exc
-        except httpx.HTTPError as exc:
-            raise LLMClientError(
-                f"Не удалось получить список моделей Ollama: {exc}"
-            ) from exc
-        except ValueError as exc:
-            raise LLMClientError("Ollama вернула некорректный ответ со списком моделей.") from exc
-
-        models = payload.get("models") if isinstance(payload, dict) else None
-        if not isinstance(models, list):
-            raise LLMClientError("Ollama вернула список моделей в неизвестном формате.")
-
-        names = sorted({
-            item["name"].strip()
-            for item in models
-            if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"].strip()
-        })
-        return names
 
     async def test_connection(self) -> str:
         """Send a short local inference request to verify the server and model."""
