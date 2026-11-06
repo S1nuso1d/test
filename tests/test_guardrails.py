@@ -4,6 +4,7 @@ from app.services.guardrails import (
     build_safe_seo_description,
     build_source_text,
     calculate_quality_score,
+    compact_seo_description,
     find_missing_data,
     find_unsupported_numbers,
     find_unsupported_unit_pairs,
@@ -213,3 +214,68 @@ def test_number_guard_preserves_negative_range_boundary() -> None:
     )
 
     assert unsupported == ["50"]
+ 
+
+def test_number_guard_accepts_temperature_range_spelled_out_with_sign_words() -> None:
+    source = "Рабочий диапазон температур: −50…+250 °C."
+    generated = "Рабочий диапазон температур — от минус 50 до плюс 250 градусов Цельсия."
+
+    assert find_unsupported_numbers(generated, source) == []
+    assert find_unsupported_unit_pairs(generated, source) == []
+
+
+def test_pressure_transmitter_treats_current_output_as_present() -> None:
+    product = ProductInput(
+        name="ОВЕН ПД100-ДИ4,0-185-0,5",
+        category="pressure_transmitter",
+        specs={"Токовый выход": "4…20 мА, двухпроводная схема"},
+    )
+
+    report = find_missing_data(product)
+    assert "Выходной сигнал" not in report.expected_specs
+
+
+def test_overlong_seo_is_compacted_without_cutting_sentences_or_changing_facts() -> None:
+    product = ProductInput(
+        name="ОВЕН ПД100-ДИ4,0-185-0,5",
+        manufacturer="ОВЕН",
+        category="pressure_transmitter",
+        description="Преобразователь давления для измерения давления в технологических системах.",
+        specs={
+            "Максимальное измеряемое давление": "4,0 МПа",
+            "Основная приведённая погрешность": "0,5 % ВПИ",
+            "Токовый выход": "4…20 мА, двухпроводная схема",
+            "Напряжение питания": "12…36 В постоянного тока",
+            "Температурный диапазон измеряемой среды": "−40…+100 °C",
+            "Температурный диапазон окружающего воздуха": "−40…+80 °C",
+            "Степень защиты корпуса": "IP65",
+        },
+    )
+    sentences = [
+        "ОВЕН ПД100-ДИ4,0-185-0,5 предназначен для измерения давления в технологических системах.",
+        "Максимальное измеряемое давление составляет 4,0 МПа.",
+        "Основная приведённая погрешность составляет 0,5 % ВПИ.",
+        "Токовый выход — 4…20 мА по двухпроводной схеме.",
+        "Напряжение питания — 12…36 В постоянного тока.",
+        "Температурный диапазон измеряемой среды — от минус 40 до плюс 100 градусов Цельсия.",
+        "Температурный диапазон окружающего воздуха — от минус 40 до плюс 80 градусов Цельсия.",
+        "Степень защиты корпуса — IP65.",
+    ]
+    filler = [
+        "Перед заказом уточните у поставщика состав комплекта и документы на выбранную модификацию.",
+        "Сопоставьте параметры прибора с требованиями измерительного канала и проектной документацией.",
+        "При необходимости запросите у поставщика сведения, которые не включены в исходную карточку.",
+        "Перед закупкой проверьте, что техническое описание относится к точному обозначению модели.",
+        "Дополнительные условия эксплуатации и монтажа уточните по паспорту конкретного исполнения.",
+    ]
+    long_description = " ".join(sentences + filler * 4)
+
+    compacted = compact_seo_description(long_description, product)
+
+    assert compacted is not None
+    assert 800 <= len(compacted) <= 1200
+    assert "4,0 МПа" in compacted
+    assert "4…20 мА" in compacted
+    assert "от минус 40 до плюс 100 градусов Цельсия" in compacted
+    assert "от минус 40 до плюс 80 градусов Цельсия" in compacted
+    assert not validate_seo_description(compacted, build_source_text(product), product)
