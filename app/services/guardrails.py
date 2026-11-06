@@ -16,13 +16,13 @@ from app.schemas import (
 )
 
 DATA_NOT_AVAILABLE = "данных нет"
-_NUMBER_PATTERN = re.compile(r"(?<![\w])\d+(?:[.,]\d+)?(?![\w])")
+_NUMBER_PATTERN = re.compile(r"(?<![\w])[-−+]?\d+(?:[.,]\d+)?(?![\w])")
 _NUMBER_UNIT_PATTERN = re.compile(
-    r"(?<![\w])(?P<number>\d+(?:[.,]\d+)?)\s*"
-    r"(?P<unit>°\s*[cс]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
-    r"мм|см|мкм|нм|км|м|ма|квт|вт|мв|кв|в|а|кг|мг|г|мл|л|"
-    r"кгц|мгц|ггц|гц|%|mpa|kpa|gpa|pa|bar|atm|mm|cm|um|nm|km|"
-    r"ma|kw|w|mv|kv|v|kg|mg|g|ml|l|khz|mhz|ghz|hz)"
+    r"(?<![\w])(?P<number>[-−+]?\d+(?:[.,]\d+)?)\s*"
+    r"(?P<unit>°\s*[cсfф]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
+    r"мм|см|мкм|нм|км|м|ма|квт|вт|мв|кв|кг|мг|г|мл|л|"
+    r"кгц|мгц|ггц|гц|%|(?-i:В|А)|mpa|kpa|gpa|pa|bar|atm|mm|cm|um|nm|km|"
+    r"ma|kw|w|mv|kv|(?-i:V|A)|kg|mg|g|ml|l|khz|mhz|ghz|hz)"
     r"(?![\w])",
     re.IGNORECASE,
 )
@@ -178,7 +178,10 @@ def build_source_text(product: ProductInput) -> str:
 
 
 def numbers_in(text: str) -> set[str]:
-    return {token.replace(",", ".") for token in _NUMBER_PATTERN.findall(text)}
+    return {
+        format(float(token.replace(",", ".").replace("−", "-")), ".12g")
+        for token in _NUMBER_PATTERN.findall(text)
+    }
 
 
 def find_unsupported_numbers(generated_text: str, source_text: str) -> list[str]:
@@ -190,7 +193,7 @@ def find_unsupported_numbers(generated_text: str, source_text: str) -> list[str]
 
 
 def _normalize_quantity_number(value: str) -> str:
-    return format(float(value.replace(",", ".")), ".12g")
+    return format(float(value.replace(",", ".").replace("−", "-")), ".12g")
 
 
 def _normalize_quantity_unit(value: str) -> str:
