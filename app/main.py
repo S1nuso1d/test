@@ -50,6 +50,16 @@ EXAMPLE_CATALOG: list[dict[str, Any]] = [
             "product_oven_pd100_di4_0_185_0_5.json",
         ],
     },
+    {
+        "id": "all_examples",
+        "title": "Все примеры (3 товара)",
+        "description": "Пакетная обработка · манометр + два прибора ОВЕН",
+        "files": [
+            "product_dm_02.json",
+            "product_oven_dts024_100p_v3_30_1.json",
+            "product_oven_pd100_di4_0_185_0_5.json",
+        ],
+    },
 ]
 
 app = FastAPI(
