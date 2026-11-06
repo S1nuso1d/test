@@ -296,3 +296,56 @@ def test_fact_audit_does_not_flag_installation_checklist_as_product_claim() -> N
     )
 
     assert findings == []
+
+def test_temperature_medium_and_ambient_ranges_are_compared_separately() -> None:
+    product = ProductInput(
+        name="ОВЕН ПД100",
+        specs={
+            "Температурный диапазон измеряемой среды": "−40…+100 °C",
+            "Температурный диапазон окружающего воздуха": "−40…+80 °C",
+        },
+    )
+    text = (
+        "Температурный диапазон измеряемой среды — от минус 40 до плюс 100 градусов Цельсия. "
+        "Температурный диапазон окружающего воздуха — от минус 40 до плюс 80 °C."
+    )
+
+    assert audit_spec_value_mismatches(text, product, "SEO-описание") == []
+
+
+def test_temperature_range_audit_still_detects_swapped_ambient_value() -> None:
+    product = ProductInput(
+        name="ОВЕН ПД100",
+        specs={
+            "Температурный диапазон измеряемой среды": "−40…+100 °C",
+            "Температурный диапазон окружающего воздуха": "−40…+80 °C",
+        },
+    )
+    text = (
+        "Температурный диапазон измеряемой среды — от минус 40 до плюс 100 °C. "
+        "Температурный диапазон окружающего воздуха — от минус 40 до плюс 100 °C."
+    )
+
+    findings = audit_spec_value_mismatches(text, product, "SEO-описание")
+    assert len(findings) == 1
+    assert findings[0].category == "Температурный диапазон окружающего воздуха"
+
+
+def test_compatibility_checklist_is_not_a_positive_claim() -> None:
+    findings = audit_text_claims(
+        "Перед выбором уточните совместимость с системой управления и проверьте возможность интеграции.",
+        "Преобразователь давления с токовым выходом 4…20 мА.",
+        "SEO-описание",
+    )
+
+    assert findings == []
+
+
+def test_positive_compatibility_and_integration_claims_are_flagged() -> None:
+    findings = audit_text_claims(
+        "Прибор полностью совместим с системой заказчика и обеспечивает простую интеграцию.",
+        "Преобразователь давления с токовым выходом 4…20 мА.",
+        "SEO-описание",
+    )
+
+    assert {finding.category for finding in findings} == {"Совместимость и интеграция"}
