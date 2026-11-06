@@ -360,13 +360,13 @@ def compact_seo_description(description: str, product: ProductInput) -> str | No
     Sentences are never rewritten. Sentences with unsupported claims or mismatched
     values are excluded; the result must still pass the regular validator.
     """
-    cleaned = re.sub(r"\\s+", " ", description).strip()
+    cleaned = re.sub(r"\s+", " ", description).strip()
     if len(cleaned) <= 1200:
         return cleaned if len(cleaned) >= 800 else None
 
     sentences = [
         item.strip()
-        for item in re.split(r"(?<=[.!?])\\s+(?=[А-ЯЁA-Z0-9«])", cleaned)
+        for item in re.split(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z0-9«])", cleaned)
         if item.strip()
     ]
     if len(sentences) < 2:
@@ -384,7 +384,7 @@ def compact_seo_description(description: str, product: ProductInput) -> str | No
         score = 10 if index == 0 else 0
         score += 6 * len(find_spec_labels(sentence, product))
         score += 2 * min(len(numbers_in(sentence) & source_numbers), 5)
-        if re.search(r"предназначен|измерени|контрол\\w*|передач\\w*|выход\\w*", sentence, re.IGNORECASE):
+        if re.search(r"предназначен|измерени|контрол\w*|передач\w*|выход\w*", sentence, re.IGNORECASE):
             score += 2
         if re.search(r"поставщик|уточн|свер|проверь|перед выбором", sentence, re.IGNORECASE):
             score += 1
