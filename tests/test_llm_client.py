@@ -177,7 +177,7 @@ async def test_repair_seo_description_uses_one_field_schema(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_generate_json_uses_optional_model_override(monkeypatch) -> None:
+async def test_generate_json_uses_configured_model(monkeypatch) -> None:
     import json
 
     from app.schemas import LLMProductCopy
@@ -220,5 +220,3 @@ async def test_generate_json_uses_optional_model_override(monkeypatch) -> None:
 
     assert calls["model"] == "qwen3.5:9b"
 
-
-@pytest.mark.asyncio
