@@ -242,10 +242,10 @@ python scripts/run_submission_check.py --products examples/product_oven_dts024_1
 Последний успешный прогон GitHub Actions от **6 ноября 2026 года**:
 
 - Ruff: **All checks passed**;
-- pytest: **83 passed, 1 warning**;
+- pytest: **77 passed, 1 warning**;
 - ошибок тестирования нет.
 
-[Открыть GitHub Actions](https://github.com/S1nuso1d/test/actions/runs/42268800629)
+[Открыть GitHub Actions](https://github.com/S1nuso1d/test/actions/runs/42271838214)
 
 Тесты охватывают:
 
