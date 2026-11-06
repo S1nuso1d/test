@@ -94,6 +94,24 @@ _RULES: tuple[tuple[str, str, str, str], ...] = (
         "warning",
         "Условия гарантии не указаны во входных данных.",
     ),
+    (
+        "Неподтверждённые преимущества",
+        r"над[её]жн\w*|высокоточн\w*|долговечн\w*|универсальн\w*|эффективн\w*|удобн\w*",
+        "warning",
+        "Оценочные преимущества не подтверждены характеристиками или описанием источника.",
+    ),
+    (
+        "Совместимость и интеграция",
+        r"совместим\w*|интеграц\w*",
+        "warning",
+        "Совместимость и возможность интеграции требуют подтверждения для конкретной модификации.",
+    ),
+    (
+        "Условия монтажа",
+        r"монтаж\w*|установк\w*|встраив\w*",
+        "warning",
+        "Способ и условия монтажа должны быть подтверждены документацией конкретной модели.",
+    ),
 )
 
 
@@ -251,13 +269,13 @@ _SPEC_ALIAS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
 )
-_SPEC_NUMBER_RE = re.compile(r"(?<![\w])\d+(?:[.,]\d+)?(?![\w])")
+_SPEC_NUMBER_RE = re.compile(r"(?<![\w])[-−+]?\d+(?:[.,]\d+)?(?![\w])")
 _SPEC_UNIT_RE = re.compile(
-    r"(?<![\w])(?P<number>\d+(?:[.,]\d+)?)\s*"
-    r"(?P<unit>°\s*[cс]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
-    r"мм|см|мкм|нм|км|м|ма|квт|вт|мв|кв|в|а|кг|мг|г|мл|л|"
+    r"(?<![\w])(?P<number>[-−+]?\d+(?:[.,]\d+)?)\s*"
+    r"(?P<unit>°\s*[cсfф]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
+    r"мм|см|мкм|нм|км|м|ма|квт|вт|мв|кв|кг|мг|г|мл|л|(?-i:В|А)|"
     r"khz|mhz|ghz|hz|mpa|kpa|gpa|pa|bar|atm|mm|cm|um|nm|km|"
-    r"ma|kw|w|mv|kv|v|kg|mg|g|ml|l)"
+    r"ma|kw|w|mv|kv|(?-i:V|A)|kg|mg|g|ml|l)"
     r"(?![\w])",
     re.IGNORECASE,
 )
@@ -265,7 +283,7 @@ _SPEC_UNIT_RE = re.compile(
 
 def _normalized_numbers(text: str) -> set[str]:
     return {
-        format(float(value.replace(",", ".")), ".12g")
+        format(float(value.replace(",", ".").replace("−", "-")), ".12g")
         for value in _SPEC_NUMBER_RE.findall(text)
     }
 
@@ -273,7 +291,7 @@ def _normalized_numbers(text: str) -> set[str]:
 def _normalized_pairs(text: str) -> set[tuple[str, str]]:
     return {
         (
-            format(float(match.group("number").replace(",", ".")), ".12g"),
+            format(float(match.group("number").replace(",", ".").replace("−", "-")), ".12g"),
             re.sub(r"\s+", "", match.group("unit").casefold()),
         )
         for match in _SPEC_UNIT_RE.finditer(text)
@@ -316,6 +334,8 @@ def audit_spec_value_mismatches(
     generated_text: str,
     product: ProductInput,
     field: str,
+    *,
+    allow_missing_units: bool = False,
 ) -> list[FactCheckFinding]:
     """Check values near known attribute labels against the corresponding source spec."""
     findings: list[FactCheckFinding] = []
@@ -339,7 +359,12 @@ def audit_spec_value_mismatches(
                 if not actual_numbers:
                     continue
                 numbers_match = expected_numbers.issubset(actual_numbers)
-                units_match = not expected_pairs or expected_pairs.issubset(actual_pairs)
+                # Search queries may omit units, but an explicitly different unit is rejected.
+                units_match = (
+                    not expected_pairs
+                    or expected_pairs.issubset(actual_pairs)
+                    or (allow_missing_units and not actual_pairs)
+                )
                 if not numbers_match or not units_match:
                     mismatch_context = context
                     break
@@ -382,5 +407,12 @@ def audit_draft_claims(
     for field, content in fields:
         findings.extend(audit_text_claims(content, source_text, field))
         if product is not None:
-            findings.extend(audit_spec_value_mismatches(content, product, field))
+            findings.extend(
+                audit_spec_value_mismatches(
+                    content,
+                    product,
+                    field,
+                    allow_missing_units=field == "Поисковые запросы",
+                )
+            )
     return findings
