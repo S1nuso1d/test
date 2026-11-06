@@ -84,7 +84,7 @@ _RULES: tuple[tuple[str, str, str, str], ...] = (
     ),
     (
         "Стойкость к агрессивной среде",
-        r"коррозионностойк\w*|кислотостойк\w*|для\s+агрессивн\w*\s+сред\w*",
+        r"коррозионностойк\w*|кислотостойк\w*|(?:для|в|при\s+работе\s+с)\s+агрессивн\w*\s+сред\w*",
         "warning",
         "Стойкость к коррозии или агрессивной среде не подтверждена исходными данными.",
     ),
@@ -96,13 +96,18 @@ _RULES: tuple[tuple[str, str, str, str], ...] = (
     ),
     (
         "Неподтверждённые преимущества",
-        r"над[её]жн\w*|высокоточн\w*|долговечн\w*|универсальн\w*|эффективн\w*|удобн\w*",
+        r"над[её]жн\w*|высокоточн\w*|долговечн\w*|универсальн\w*|эффективн\w*|"
+        r"удобн\w*\s+(?:монтаж\w*|подключени\w*|интеграц\w*|эксплуатаци\w*)",
         "warning",
         "Оценочные преимущества не подтверждены характеристиками или описанием источника.",
     ),
     (
         "Совместимость и интеграция",
-        r"совместим\w*|интеграц\w*",
+        r"(?:полностью\s+)?совместим\w+\s+с\b|"
+        r"(?:обеспечивает|гарантирует|позволяет|поддерживает)\w*\s+(?:полную\s+)?"
+        r"(?:совместимость|интеграци\w*)|"
+        r"(?:прост\w*|удобн\w*|быстр\w*)\s+интеграци\w*|"
+        r"(?:готов\w*|предусмотрен\w*)\s+(?:к\s+)?интеграци\w*",
         "warning",
         "Совместимость и возможность интеграции требуют подтверждения для конкретной модификации.",
     ),
@@ -150,14 +155,27 @@ def audit_text_claims(
                 continue
 
             # Do not flag a disclaimer or a buyer checklist as a positive product claim.
-            context = generated_text[
-                max(0, match.start() - 55) : min(len(generated_text), match.end() + 55)
-            ].casefold()
+            sentence_start = max(
+                generated_text.rfind(".", 0, match.start()),
+                generated_text.rfind("!", 0, match.start()),
+                generated_text.rfind("?", 0, match.start()),
+                generated_text.rfind("\n", 0, match.start()),
+            ) + 1
+            sentence_ends = [
+                position
+                for token in (".", "!", "?", "\n")
+                if (position := generated_text.find(token, match.end())) >= 0
+            ]
+            sentence_end = min(sentence_ends) if sentence_ends else len(generated_text)
+            context = generated_text[sentence_start:sentence_end].casefold()
             if re.search(
-                r"не указано|не указана|не подтвержден|не подтверждена|не подтверждает|не подтверждают|отсутствует|нет данных|"
-                r"уточните|проверьте|сверьте|запросите|подтвердите|не позволяет|"
-                r"нельзя подтвердить|нельзя делать вывод|не заменяет|следует проверить|"
-                r"может потребоваться|не переносите выводы",
+                r"не указано|не указана|не подтвержден|не подтверждена|не подтверждает|"
+                r"не подтверждают|отсутствует|нет данных|требуется подтверждение|"
+                r"нужно подтвердить|необходимо подтвердить|при необходимости|если требуется|"
+                r"уточните|уточнить|проверьте|проверить|сверьте|сверить|запросите|запросить|"
+                r"подтвердите|не позволяет|нельзя подтвердить|нельзя делать вывод|"
+                r"не заменяет|следует проверить|рекомендуется сверить|может потребоваться|"
+                r"не переносите выводы|перед выбором|перед заказом",
                 context,
             ):
                 continue
@@ -184,6 +202,20 @@ def audit_text_claims(
 # Specific aliases are checked before generic ones. In particular, temperature ranges
 # must not be mistaken for measurement ranges merely because both contain "диапазон".
 _SPEC_ALIAS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "Диапазон температуры измеряемой среды",
+        (
+            r"(?<!\w)температур\w*\s+диапазон\w*\s+измеряем\w*\s+сред\w*(?!\w)",
+            r"(?<!\w)диапазон\w*\s+температур\w*\s+измеряем\w*\s+сред\w*(?!\w)",
+        ),
+    ),
+    (
+        "Диапазон температуры окружающего воздуха",
+        (
+            r"(?<!\w)температур\w*\s+диапазон\w*\s+окружающ\w*\s+воздух\w*(?!\w)",
+            r"(?<!\w)диапазон\w*\s+температур\w*\s+окружающ\w*\s+воздух\w*(?!\w)",
+        ),
+    ),
     (
         "Диапазон температуры",
         (
@@ -266,15 +298,22 @@ _SPEC_ALIAS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             r"(?<!\w)выходн\w*\s+сигнал\w*(?!\w)",
             r"(?<!\w)сигнал\w*\s+выход\w*(?!\w)",
+            r"(?<!\w)токов\w*\s+выход\w*(?!\w)",
             r"(?<!\w)output\s+signal(?!\w)",
             r"(?<!\w)output(?!\w)",
         ),
     ),
 )
 _SPEC_NUMBER_RE = re.compile(r"(?<![\w])[-−+]?\d+(?:[.,]\d+)?(?![\w])")
+_VERBAL_SIGN_NUMBER_RE = re.compile(
+    r"(?P<sign>минус|плюс|отрицательн\w*|положительн\w*)\s+"
+    r"(?P<number>\d+(?:[.,]\d+)?)",
+    re.IGNORECASE,
+)
 _SPEC_UNIT_RE = re.compile(
     r"(?<![\w])(?P<number>[-−+]?\d+(?:[.,]\d+)?)\s*"
-    r"(?P<unit>°\s*[cсfф]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
+    r"(?P<unit>градус\w*\s+цельси\w*|градус\w*\s+фаренгейт\w*|"
+    r"degrees?\s+celsius|degrees?\s+fahrenheit|°\s*[cсfф]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
     r"мм|см|мкм|нм|км|м|ма|квт|вт|мв|кв|кг|мг|г|мл|л|(?-i:В|А)|"
     r"khz|mhz|ghz|hz|mpa|kpa|gpa|pa|bar|atm|mm|cm|um|nm|km|"
     r"ma|kw|w|mv|kv|(?-i:V|A)|kg|mg|g|ml|l)"
@@ -283,21 +322,45 @@ _SPEC_UNIT_RE = re.compile(
 )
 
 
+def _normalize_number(value: str, sign: str = "") -> str:
+    number = float(value.replace(",", ".").replace("−", "-"))
+    if sign.casefold().startswith(("минус", "отриц")):
+        number = -abs(number)
+    return format(number, ".12g")
+
+
 def _normalized_numbers(text: str) -> set[str]:
-    return {
-        format(float(value.replace(",", ".").replace("−", "-")), ".12g")
-        for value in _SPEC_NUMBER_RE.findall(text)
-    }
+    values: set[str] = set()
+    verbal_sign_spans: list[tuple[int, int]] = []
+    for match in _VERBAL_SIGN_NUMBER_RE.finditer(text):
+        verbal_sign_spans.append(match.span("number"))
+        values.add(_normalize_number(match.group("number"), match.group("sign")))
+    for match in _SPEC_NUMBER_RE.finditer(text):
+        if any(start <= match.start() and match.end() <= end for start, end in verbal_sign_spans):
+            continue
+        values.add(_normalize_number(match.group(0)))
+    return values
 
 
 def _normalized_pairs(text: str) -> set[tuple[str, str]]:
     return {
         (
             format(float(match.group("number").replace(",", ".").replace("−", "-")), ".12g"),
-            re.sub(r"\s+", "", match.group("unit").casefold()),
+            _normalize_spec_unit(match.group("unit")),
         )
         for match in _SPEC_UNIT_RE.finditer(text)
     }
+
+
+def _normalize_spec_unit(value: str) -> str:
+    normalized = re.sub(r"\s+", "", value.casefold())
+    if normalized.startswith("градус") or normalized.startswith("degree"):
+        return "°c" if "цельс" in normalized or "celsius" in normalized else "°f"
+    if normalized == "°с":
+        return "°c"
+    if normalized == "°ф":
+        return "°f"
+    return normalized
 
 
 def _aliases_for_spec(key: str) -> tuple[re.Pattern[str], ...]:
