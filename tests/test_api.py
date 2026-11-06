@@ -94,10 +94,11 @@ def test_examples_endpoint_returns_single_and_batch_examples() -> None:
     examples = response.json()["examples"]
     by_id = {item["id"]: item for item in examples}
 
-    assert set(by_id) == {"dm02", "dts024", "pd100", "assignment_pair"}
+    assert set(by_id) == {"dm02", "dts024", "pd100", "assignment_pair", "all_examples"}
     assert len(by_id["dm02"]["products"]) == 1
     assert len(by_id["dts024"]["products"]) == 1
     assert len(by_id["pd100"]["products"]) == 1
     assert len(by_id["assignment_pair"]["products"]) == 2
+    assert len(by_id["all_examples"]["products"]) == 3
     assert "ДТС024-100П.В3.30/1" in by_id["dts024"]["products"][0]["name"]
     assert "ПД100-ДИ4,0-185-0,5" in by_id["pd100"]["products"][0]["name"]
