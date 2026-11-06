@@ -42,7 +42,8 @@ def test_seo_prompts_require_product_copy_instead_of_repetitive_checklists() -> 
     from app.services.prompts import SEO_REPAIR_SYSTEM_PROMPT
 
     assert "готовый связный текст товарной карточки" in SYSTEM_PROMPT
-    assert "не превращай весь текст в чек-лист" in SEO_REPAIR_SYSTEM_PROMPT
+    assert "Не превышай 1200 символов" in SEO_REPAIR_SYSTEM_PROMPT
+    assert "не перечисляй все specs" in SEO_REPAIR_SYSTEM_PROMPT
     assert "удобный монтаж" in SYSTEM_PROMPT
 
 def test_seo_prompts_set_a_hard_length_and_fact_selection_budget() -> None:
