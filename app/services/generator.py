@@ -13,6 +13,7 @@ from app.services.guardrails import (
     build_safe_seo_description,
     build_source_text,
     calculate_quality_score,
+    compact_seo_description,
     find_missing_data,
     find_missing_fields,
     has_substantive_product_data,
@@ -201,6 +202,15 @@ async def generate_product_copy(
             best_draft = candidate
             if not repair_feedback:
                 break
+
+        if len(best_draft.seo_description.strip()) > 1200:
+            compacted_description = compact_seo_description(best_draft.seo_description, product)
+            if compacted_description:
+                compacted_issues = validate_seo_description(compacted_description, source_text, product)
+                if not compacted_issues:
+                    best_draft = best_draft.model_copy(
+                        update={"seo_description": compacted_description}
+                    )
 
         if validate_seo_description(best_draft.seo_description, source_text, product):
             try:
