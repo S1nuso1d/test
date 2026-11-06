@@ -245,7 +245,7 @@ python scripts/run_submission_check.py --products examples/product_oven_dts024_1
 - pytest: **83 passed, 1 warning**;
 - ошибок тестирования нет.
 
-[Открыть GitHub Actions](https://github.com/S1nuso1d/test/actions/runs/42268537615)
+[Открыть GitHub Actions](https://github.com/S1nuso1d/test/actions/runs/42268800629)
 
 Тесты охватывают:
 
