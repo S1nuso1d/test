@@ -191,3 +191,25 @@ def test_formal_quality_score_is_not_a_semantic_accuracy_claim() -> None:
 
     short_draft = _draft(seo_description="Коротко")
     assert calculate_quality_score(short_draft, source) < 100
+
+def test_unit_guard_does_not_treat_lowercase_russian_preposition_as_volt() -> None:
+    source = "Длина кабельного вывода: 1 м."
+    generated = "Длина кабельного вывода — 1 м. Перед заказом уточните сведения в паспорте."
+
+    assert find_unsupported_unit_pairs(generated, source) == []
+
+
+def test_unit_guard_still_recognizes_uppercase_cyrillic_volt() -> None:
+    source = "Длина кабельного вывода: 1 м."
+    generated = "Напряжение питания: 1 В."
+
+    assert find_unsupported_unit_pairs(generated, source) == ["1 в"]
+
+
+def test_number_guard_preserves_negative_range_boundary() -> None:
+    unsupported = find_unsupported_numbers(
+        "Рабочий диапазон температур 50…+250 °C.",
+        "Рабочий диапазон температур −50…+250 °C.",
+    )
+
+    assert unsupported == ["50"]
