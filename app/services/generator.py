@@ -202,7 +202,7 @@ async def generate_product_copy(
             if not repair_feedback:
                 break
 
-        if validate_seo_description(best_draft.seo_description, source_text):
+        if validate_seo_description(best_draft.seo_description, source_text, product):
             try:
                 fallback_description = build_safe_seo_description(product)
                 fallback_issues = validate_seo_description(fallback_description, source_text, product)
