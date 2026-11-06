@@ -242,3 +242,57 @@ def test_validation_accepts_audience_without_technical_specification() -> None:
         product,
     )
     assert not any("Поле «Кому подходит»" in issue for issue in issues)
+
+def test_search_query_may_omit_temperature_unit_without_flagging_range() -> None:
+    product = ProductInput(
+        name="ОВЕН ДТС024-100П.В3.30/1",
+        specs={"Рабочий диапазон измеряемых температур для НСХ 50П/100П/Pt100": "−50…+250 °C"},
+    )
+
+    findings = audit_spec_value_mismatches(
+        "датчик температуры ОВЕН диапазон -50 до +250",
+        product,
+        "Поисковые запросы",
+        allow_missing_units=True,
+    )
+
+    assert findings == []
+
+
+def test_search_query_still_rejects_an_explicitly_wrong_temperature_unit() -> None:
+    product = ProductInput(
+        name="ОВЕН ДТС024-100П.В3.30/1",
+        specs={"Рабочий диапазон измеряемых температур для НСХ 50П/100П/Pt100": "−50…+250 °C"},
+    )
+
+    findings = audit_spec_value_mismatches(
+        "датчик температуры ОВЕН диапазон -50 до +250 °F",
+        product,
+        "Поисковые запросы",
+        allow_missing_units=True,
+    )
+
+    assert len(findings) == 1
+    assert findings[0].severity == "critical"
+
+
+def test_fact_audit_flags_unsupported_marketing_promises() -> None:
+    findings = audit_text_claims(
+        "Прибор обеспечивает надёжное измерение и удобную интеграцию в систему управления.",
+        "Термопреобразователь сопротивления для измерения температуры.",
+        "SEO-описание",
+    )
+
+    categories = {finding.category for finding in findings}
+    assert "Неподтверждённые преимущества" in categories
+    assert "Совместимость и интеграция" in categories
+
+
+def test_fact_audit_does_not_flag_installation_checklist_as_product_claim() -> None:
+    findings = audit_text_claims(
+        "Перед заказом проверьте требования к монтажу и интеграции по паспорту изделия.",
+        "Термопреобразователь сопротивления.",
+        "SEO-описание",
+    )
+
+    assert findings == []
