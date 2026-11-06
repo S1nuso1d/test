@@ -19,7 +19,8 @@ DATA_NOT_AVAILABLE = "данных нет"
 _NUMBER_PATTERN = re.compile(r"(?<![\w])[-−+]?\d+(?:[.,]\d+)?(?![\w])")
 _NUMBER_UNIT_PATTERN = re.compile(
     r"(?<![\w])(?P<number>[-−+]?\d+(?:[.,]\d+)?)\s*"
-    r"(?P<unit>°\s*[cсfф]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
+    r"(?P<unit>градус\w*\s+цельси\w*|градус\w*\s+фаренгейт\w*|"
+    r"degrees?\s+celsius|degrees?\s+fahrenheit|°\s*[cсfф]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
     r"мм|см|мкм|нм|км|м|ма|квт|вт|мв|кв|кг|мг|г|мл|л|"
     r"кгц|мгц|ггц|гц|%|(?-i:В|А)|mpa|kpa|gpa|pa|bar|atm|mm|cm|um|nm|km|"
     r"ma|kw|w|mv|kv|(?-i:V|A)|kg|mg|g|ml|l|khz|mhz|ghz|hz)"
@@ -53,7 +54,7 @@ CATEGORY_RULES: dict[str, dict[str, tuple[str, ...]]] = {
     "pressure_transmitter": {
         "Диапазон измерений": ("диапазон", "предел измерения", "measurement range", "range"),
         "Класс точности": ("класс точности", "точность", "accuracy class", "accuracy"),
-        "Выходной сигнал": ("выходной сигнал", "сигнал выхода", "output signal", "output"),
+        "Выходной сигнал": ("выходной сигнал", "сигнал выхода", "токовый выход", "output signal", "output"),
         "Напряжение питания": ("питание", "напряжение", "supply voltage", "power supply"),
         "Присоединение": ("присоединение", "резьб", "connection", "thread"),
         "Степень защиты": ("степень защиты", "ip rating", "ingress protection"),
@@ -177,11 +178,31 @@ def build_source_text(product: ProductInput) -> str:
     return "\n".join(part for part in parts if part)
 
 
+_VERBAL_SIGN_NUMBER_PATTERN = re.compile(
+    r"(?P<sign>минус|плюс|отрицательн\w*|положительн\w*)\s+"
+    r"(?P<number>\d+(?:[.,]\d+)?)",
+    re.IGNORECASE,
+)
+
+
+def _normalized_number(value: str, sign: str = "") -> str:
+    number = float(value.replace(",", ".").replace("−", "-"))
+    if sign.casefold().startswith(("минус", "отриц")):
+        number = -abs(number)
+    return format(number, ".12g")
+
+
 def numbers_in(text: str) -> set[str]:
-    return {
-        format(float(token.replace(",", ".").replace("−", "-")), ".12g")
-        for token in _NUMBER_PATTERN.findall(text)
-    }
+    values: set[str] = set()
+    verbal_sign_spans: list[tuple[int, int]] = []
+    for match in _VERBAL_SIGN_NUMBER_PATTERN.finditer(text):
+        verbal_sign_spans.append(match.span("number"))
+        values.add(_normalized_number(match.group("number"), match.group("sign")))
+    for match in _NUMBER_PATTERN.finditer(text):
+        if any(start <= match.start() and match.end() <= end for start, end in verbal_sign_spans):
+            continue
+        values.add(_normalized_number(match.group(0)))
+    return values
 
 
 def find_unsupported_numbers(generated_text: str, source_text: str) -> list[str]:
@@ -198,8 +219,12 @@ def _normalize_quantity_number(value: str) -> str:
 
 def _normalize_quantity_unit(value: str) -> str:
     normalized = re.sub(r"\s+", "", value.casefold())
+    if normalized.startswith("градус") or normalized.startswith("degree"):
+        return "°c" if "цельс" in normalized or "celsius" in normalized else "°f"
     if normalized == "°с":
         return "°c"
+    if normalized == "°ф":
+        return "°f"
     return normalized
 
 
@@ -327,6 +352,62 @@ def validate_seo_description(
                 f"{finding.message}"
             )
     return issues
+
+
+def compact_seo_description(description: str, product: ProductInput) -> str | None:
+    """Shorten overlong SEO copy by removing whole low-value sentences only.
+
+    Sentences are never rewritten. Sentences with unsupported claims or mismatched
+    values are excluded; the result must still pass the regular validator.
+    """
+    cleaned = re.sub(r"\\s+", " ", description).strip()
+    if len(cleaned) <= 1200:
+        return cleaned if len(cleaned) >= 800 else None
+
+    sentences = [
+        item.strip()
+        for item in re.split(r"(?<=[.!?])\\s+(?=[А-ЯЁA-Z0-9«])", cleaned)
+        if item.strip()
+    ]
+    if len(sentences) < 2:
+        return None
+
+    source_text = build_source_text(product)
+    source_numbers = numbers_in(source_text)
+    ranked: list[tuple[int, int, str]] = []
+    for index, sentence in enumerate(sentences):
+        if audit_text_claims(sentence, source_text, "SEO-описание"):
+            continue
+        if audit_spec_value_mismatches(sentence, product, "SEO-описание"):
+            continue
+
+        score = 10 if index == 0 else 0
+        score += 6 * len(find_spec_labels(sentence, product))
+        score += 2 * min(len(numbers_in(sentence) & source_numbers), 5)
+        if re.search(r"предназначен|измерени|контрол\\w*|передач\\w*|выход\\w*", sentence, re.IGNORECASE):
+            score += 2
+        if re.search(r"поставщик|уточн|свер|проверь|перед выбором", sentence, re.IGNORECASE):
+            score += 1
+        if re.search(r"не заменяет|описание основано|перед публикацией|в целом|при этом", sentence, re.IGNORECASE):
+            score -= 2
+        ranked.append((score, index, sentence))
+
+    if not ranked or not any(index == 0 for _, index, _ in ranked):
+        return None
+    chosen: list[tuple[int, int, str]] = [next(item for item in ranked if item[1] == 0)]
+    current_length = len(chosen[0][2])
+    remaining = sorted(
+        (entry for entry in ranked if entry[1] != 0),
+        key=lambda entry: (-entry[0], entry[1]),
+    )
+    for item in remaining:
+        candidate_length = current_length + 1 + len(item[2])
+        if candidate_length <= 1200:
+            chosen.append(item)
+            current_length = candidate_length
+
+    result = " ".join(sentence for _, _, sentence in sorted(chosen, key=lambda entry: entry[1]))
+    return result if 800 <= len(result) <= 1200 else None
 
 
 def build_safe_seo_description(product: ProductInput) -> str:
