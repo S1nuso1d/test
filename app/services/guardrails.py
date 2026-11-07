@@ -272,7 +272,7 @@ def find_lost_qualifiers(generated_text: str, product: ProductInput) -> list[str
             if not _QUALIFIER_BEFORE_RE.search(before):
                 issues.append(
                     f"Потерян модификатор значения: у параметра «{key}» в источнике "
-                    f"«{value», а в тексте «{tail}» без «{match.group('q')}»"
+                    f"«{value}», а в тексте «{tail}» без «{match.group('q')}»"
                 )
                 break
     return issues
