@@ -1,6 +1,11 @@
 from app.schemas import LLMProductCopy, ProductInput
 from app.services.guardrails import validate_generated_copy, validate_seo_description
-from app.services.claim_audit import audit_draft_claims, audit_spec_value_mismatches, audit_text_claims
+from app.services.claim_audit import (
+    audit_draft_claims,
+    audit_spec_value_mismatches,
+    audit_text_claims,
+    drop_flagged_sentences,
+)
 
 
 def test_unprovided_explosion_protection_is_critical() -> None:
@@ -349,3 +354,52 @@ def test_positive_compatibility_and_integration_claims_are_flagged() -> None:
     )
 
     assert {finding.category for finding in findings} == {"Совместимость и интеграция"}
+
+
+
+def test_one_source_word_does_not_excuse_other_advertising_words() -> None:
+    findings = audit_text_claims(
+        "Надёжный датчик, проверьте паспорт.",
+        "Универсальный термопреобразователь сопротивления.",
+        "SEO-описание",
+    )
+    assert {finding.category for finding in findings} == {"Неподтверждённые преимущества"}
+
+
+def test_negated_aggressive_media_in_source_does_not_confirm_aggressive_environments() -> None:
+    source = "Среды: пар, газ, если они не агрессивны к материалу корпуса датчика."
+    findings = audit_text_claims("Датчик для работы в агрессивных средах.", source, "SEO-описание")
+    assert [finding.category for finding in findings] == ["Стойкость к агрессивной среде"]
+
+
+def test_advertising_claim_is_not_excused_by_a_checklist_phrase() -> None:
+    findings = audit_text_claims(
+        "Датчик рассчитан на тяжёлые условия эксплуатации; сверьте это с паспортом.",
+        "Термопреобразователь сопротивления.",
+        "SEO-описание",
+    )
+    assert findings
+
+
+def test_confirmed_warranty_and_climate_resistance_are_not_flagged() -> None:
+    source = "Гарантия: 12 мес. Устойчивость к климатическим воздействиям: УХЛ 3.1."
+    assert audit_text_claims("Гарантия производителя 12 мес.", source, "SEO-описание") == []
+    assert audit_text_claims(
+        "Устойчивость к климатическим воздействиям УХЛ 3.1.", source, "SEO-описание"
+    ) == []
+
+
+def test_drop_flagged_sentences_removes_only_unconfirmed_sentences() -> None:
+    text = "Прибор измеряет давление. Надёжный датчик для агрессивных сред. Диапазон 0–1,6 МПа."
+    cleaned = drop_flagged_sentences(
+        text, "Манометр. диапазон: 0–1,6 МПа", None, "SEO-описание"
+    )
+    assert cleaned == "Прибор измеряет давление. Диапазон 0–1,6 МПа."
+
+
+def test_lost_qualifier_is_detected() -> None:
+    from app.services.guardrails import find_lost_qualifiers
+
+    product = ProductInput(name="X", specs={"Потребляемая мощность": "не более 0,8 Вт"})
+    assert find_lost_qualifiers("Потребляемая мощность 0,8 Вт.", product)
+    assert not find_lost_qualifiers("Потребляемая мощность не более 0,8 Вт.", product)

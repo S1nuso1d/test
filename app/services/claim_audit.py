@@ -84,19 +84,28 @@ _RULES: tuple[tuple[str, str, str, str], ...] = (
     ),
     (
         "Стойкость к агрессивной среде",
-        r"коррозионностойк\w*|кислотостойк\w*|(?:для|в|при\s+работе\s+с)\s+агрессивн\w*\s+сред\w*",
+        r"коррозионностойк\w*|кислотостойк\w*|агрессивн\w*\s+(?:сред\w*|услови\w*)",
         "warning",
         "Стойкость к коррозии или агрессивной среде не подтверждена исходными данными.",
     ),
     (
+        "Тяжёлые условия эксплуатации",
+        r"(?:тяжёл\w*|тяжел\w*|жёстк\w*|жестк\w*|сложн\w*|экстремальн\w*)\s+"
+        r"(?:услови\w*|режим\w*)(?:\s+эксплуатаци\w*)?|"
+        r"устойчив\w*\s+к\s+(?!климатическ)\w+|вибро\w+|ударопрочн\w*",
+        "warning",
+        "Работа в тяжёлых условиях или устойчивость к воздействиям не подтверждена исходными данными.",
+    ),
+    (
         "Гарантия",
-        r"гаранти\w*(?:\s+\w+){0,2}",
+        r"гаранти\w*",
         "warning",
         "Условия гарантии не указаны во входных данных.",
     ),
     (
         "Неподтверждённые преимущества",
         r"над[её]жн\w*|высокоточн\w*|долговечн\w*|универсальн\w*|эффективн\w*|"
+        r"безотказн\w*|износостойк\w*|прочн\w*|качественн\w*|"
         r"удобн\w*\s+(?:монтаж\w*|подключени\w*|интеграц\w*|эксплуатаци\w*)",
         "warning",
         "Оценочные преимущества не подтверждены характеристиками или описанием источника.",
@@ -122,6 +131,26 @@ _RULES: tuple[tuple[str, str, str, str], ...] = (
 )
 
 
+def _stem_key(text: str) -> str:
+    """Normalize a matched phrase to word stems, so inflected forms compare equal."""
+    words = re.findall(r"\w+", text.casefold().replace("ё", "е"))
+    return " ".join(word[:4] for word in words)
+
+
+# Advertising-style claims are never excused by a nearby "check the passport" phrase.
+_NO_DISCLAIMER_SKIP = frozenset(
+    {
+        "Неподтверждённые преимущества",
+        "Стойкость к агрессивной среде",
+        "Тяжёлые условия эксплуатации",
+    }
+)
+_EXPLICIT_NEGATION = (
+    r"не указано|не указана|не подтвержден|не подтверждена|не подтверждает|"
+    r"не подтверждают|отсутствует|нет данных|нельзя подтвердить|не является|не заявлен"
+)
+
+
 def audit_text_claims(
     generated_text: str,
     source_text: str,
@@ -138,23 +167,28 @@ def audit_text_claims(
 
     for label, expression, severity, explanation in _RULES:
         pattern = re.compile(expression, re.IGNORECASE)
-        source_matches = {
-            re.sub(r"\s+", "", match.group(0)).upper()
-            for match in pattern.finditer(source_text)
-        }
+        if label == "Степень защиты IP":
+            source_matches = {
+                re.sub(r"\s+", "", match.group(0)).upper()
+                for match in pattern.finditer(source_text)
+            }
+        else:
+            source_matches = {
+                _stem_key(match.group(0)) for match in pattern.finditer(source_text)
+            }
 
         for match in pattern.finditer(generated_text):
             claim = match.group(0).strip()
             if label == "Степень защиты IP":
                 if re.sub(r"\s+", "", claim).upper() in source_matches:
                     continue
-            elif source_matches:
+            elif _stem_key(claim) in source_matches:
                 continue
+
             key = (label, claim.casefold())
             if key in seen:
                 continue
 
-            # Do not flag a disclaimer or a buyer checklist as a positive product claim.
             sentence_start = max(
                 generated_text.rfind(".", 0, match.start()),
                 generated_text.rfind("!", 0, match.start()),
@@ -168,16 +202,19 @@ def audit_text_claims(
             ]
             sentence_end = min(sentence_ends) if sentence_ends else len(generated_text)
             context = generated_text[sentence_start:sentence_end].casefold()
-            if re.search(
-                r"не указано|не указана|не подтвержден|не подтверждена|не подтверждает|"
-                r"не подтверждают|отсутствует|нет данных|требуется подтверждение|"
-                r"нужно подтвердить|необходимо подтвердить|при необходимости|если требуется|"
-                r"уточните|уточнить|проверьте|проверить|сверьте|сверить|запросите|запросить|"
-                r"подтвердите|не позволяет|нельзя подтвердить|нельзя делать вывод|"
-                r"не заменяет|следует проверить|рекомендуется сверить|может потребоваться|"
-                r"не переносите выводы|перед выбором|перед заказом",
-                context,
-            ):
+
+            if label in _NO_DISCLAIMER_SKIP:
+                disclaimer = _EXPLICIT_NEGATION
+            else:
+                disclaimer = (
+                    _EXPLICIT_NEGATION
+                    + r"|требуется подтверждение|нужно подтвердить|необходимо подтвердить|"
+                    + r"при необходимости|если требуется|уточните|уточнить|проверьте|проверить|"
+                    + r"сверьте|сверить|запросите|запросить|подтвердите|не позволяет|"
+                    + r"нельзя делать вывод|не заменяет|следует проверить|рекомендуется сверить|"
+                    + r"может потребоваться|не переносите выводы|перед выбором|перед заказом"
+                )
+            if re.search(disclaimer, context):
                 continue
 
             seen.add(key)
@@ -193,10 +230,6 @@ def audit_text_claims(
             break
 
     return findings
-
-
-
-
 
 
 # Specific aliases are checked before generic ones. In particular, temperature ranges
@@ -481,3 +514,29 @@ def audit_draft_claims(
                 )
             )
     return findings
+
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z0-9«])|\n+")
+
+
+def drop_flagged_sentences(
+    text: str,
+    source_text: str,
+    product: ProductInput | None,
+    field: str,
+) -> str:
+    """Remove whole sentences that carry unconfirmed claims or mismatched values.
+
+    Sentences are never rewritten: a sentence is kept verbatim or dropped.
+    """
+    kept: list[str] = []
+    for sentence in _SENTENCE_SPLIT_RE.split(text.strip()):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if audit_text_claims(sentence, source_text, field):
+            continue
+        if product is not None and audit_spec_value_mismatches(sentence, product, field):
+            continue
+        kept.append(sentence)
+    return " ".join(kept)

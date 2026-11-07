@@ -222,3 +222,33 @@ async def test_generator_retries_when_technical_range_is_put_in_audience_field(m
     assert result.sales_section.suitable_for == [
         "Специалисты по подбору приборов измерения давления"
     ]
+
+
+
+async def test_generator_removes_claims_the_model_could_not_fix(monkeypatch) -> None:
+    prompts: list[str] = []
+
+    async def fake_generate_json(self, system_prompt: str, user_prompt: str) -> dict:
+        prompts.append(user_prompt)
+        return good_response(
+            sales_section={
+                "suitable_for": ["Специалисты по подбору приборов измерения давления"],
+                "tasks_solved": ["Измерение избыточного давления, указанное в описании прибора"],
+                "pitch": (
+                    "Надёжный прибор для агрессивных сред. "
+                    "Перед подбором сверьте параметры с паспортом."
+                ),
+            }
+        )
+
+    monkeypatch.setattr("app.services.generator.LLMClient.generate_json", fake_generate_json)
+    result = await generate_product_copy(PRODUCT, Settings())
+
+    assert len(prompts) == 3
+    assert "<previous_draft>" in prompts[1]
+    assert result.status == "needs_review"
+    assert result.sales_section is not None
+    assert "Надёжный" not in result.sales_section.pitch
+    assert "агрессивных" not in result.sales_section.pitch
+    assert "Перед подбором сверьте параметры с паспортом." in result.sales_section.pitch
+    assert any("автоматически удалены" in warning for warning in result.warnings)

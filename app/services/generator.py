@@ -1,7 +1,12 @@
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.services.claim_audit import audit_draft_claims
+from app.services.claim_audit import (
+    audit_draft_claims,
+    audit_spec_value_mismatches,
+    audit_text_claims,
+    drop_flagged_sentences,
+)
 from app.schemas import (
     GenerationResponse,
     LLMProductCopy,
@@ -54,6 +59,79 @@ def _validation_feedback(issues: list[str], attempt: int) -> str:
     )
 
 
+
+def _is_clean(text: str, source_text: str, product: ProductInput, field: str) -> bool:
+    return not audit_text_claims(text, source_text, field) and not audit_spec_value_mismatches(
+        text, product, field, allow_missing_units=field == "Поисковые запросы"
+    )
+
+
+def _sanitize_draft(
+    draft: LLMProductCopy, source_text: str, product: ProductInput
+) -> tuple[LLMProductCopy, bool]:
+    """Remove unconfirmed claims without rewriting or inventing replacement facts.
+
+    Whole sentences and individual list items are kept verbatim or dropped.
+    If required fields become empty, neutral review placeholders are used.
+    """
+    sales = draft.sales_section
+    changed = False
+
+    title = draft.seo_title.strip()
+    if not _is_clean(title, source_text, product, "SEO-заголовок"):
+        base = " ".join(part for part in (product.name, product.manufacturer) if part)
+        title = base[:70].rstrip(" ,;:—-") or title
+        changed = True
+
+    description = drop_flagged_sentences(
+        draft.seo_description, source_text, product, "SEO-описание"
+    )
+    changed |= description != draft.seo_description.strip()
+
+    queries = [
+        query
+        for query in draft.seo_queries
+        if _is_clean(query, source_text, product, "Поисковые запросы")
+    ]
+    changed |= len(queries) != len(draft.seo_queries)
+
+    suitable = [
+        item for item in sales.suitable_for
+        if _is_clean(item, source_text, product, "Кому подходит")
+    ]
+    tasks = [
+        item for item in sales.tasks_solved
+        if _is_clean(item, source_text, product, "Решаемые задачи")
+    ]
+    pitch = drop_flagged_sentences(
+        sales.pitch, source_text, product, "Тезисы для менеджера"
+    )
+    changed |= len(suitable) != len(sales.suitable_for) or len(tasks) != len(sales.tasks_solved)
+    changed |= pitch != sales.pitch.strip()
+
+    if not changed:
+        return draft, False
+    if not suitable:
+        suitable = ["Целевую аудиторию нужно уточнить"]
+    if not tasks:
+        tasks = ["Решаемые задачи нужно уточнить по документации прибора"]
+    if not pitch:
+        pitch = "Перед предложением клиенту сверьте параметры с паспортом изделия."
+
+    return (
+        LLMProductCopy(
+            seo_title=title,
+            seo_description=description,
+            seo_queries=queries,
+            sales_section=SalesSection(
+                suitable_for=suitable,
+                tasks_solved=tasks,
+                pitch=pitch,
+            ),
+        ),
+        True,
+    )
+
 def _to_response(
     product: ProductInput,
     raw: LLMProductCopy,
@@ -62,10 +140,11 @@ def _to_response(
     attempts: int,
     seo_repair_attempts: int = 0,
     fallback_used: bool = False,
+    sanitized: bool = False,
 ) -> GenerationResponse:
     source_text = build_source_text(product)
     fact_check_findings = audit_draft_claims(raw, source_text, product)
-    needs_review = bool(issues) or fallback_used or bool(fact_check_findings)
+    needs_review = bool(issues) or fallback_used or sanitized or bool(fact_check_findings)
     warnings = ["Черновик требует проверки контент-менеджером перед публикацией."]
     if missing_data.fields or missing_data.empty_specs or missing_data.expected_specs:
         warnings.append(
@@ -77,6 +156,11 @@ def _to_response(
             "SEO-описание сформировано резервным локальным шаблоном из исходных данных "
             "и общих рекомендаций по проверке перед покупкой; это не полноценный SEO-текст модели."
             " Обязательно отредактируйте его перед публикацией."
+        )
+    if sanitized:
+        warnings.append(
+            "Часть неподтверждённых утверждений не удалось исправить генерацией; "
+            "предложения с ними автоматически удалены. Проверьте связность текста."
         )
     if issues:
         warnings.append(
@@ -141,6 +225,7 @@ async def generate_product_copy(
     client = LLMClient(settings)
     source_text = build_source_text(product)
     correction: str | None = None
+    previous_draft: dict | None = None
     best_draft: LLMProductCopy | None = None
     best_issues: list[str] = []
     max_attempts = 3
@@ -149,7 +234,7 @@ async def generate_product_copy(
     for attempt in range(1, max_attempts + 1):
         raw_result = await client.generate_json(
             SYSTEM_PROMPT,
-            build_user_prompt(product, correction=correction),
+            build_user_prompt(product, correction=correction, previous_draft=previous_draft),
         )
         try:
             draft = LLMProductCopy.model_validate(raw_result)
@@ -166,13 +251,20 @@ async def generate_product_copy(
             continue
 
         issues = validate_generated_copy(draft, source_text, product)
-        best_draft, best_issues = draft, issues
         if not issues:
             return _to_response(product, draft, missing_data, [], attempt)
+        if best_draft is None or len(issues) <= len(best_issues):
+            best_draft, best_issues = draft, issues
+        previous_draft = draft.model_dump()
         correction = _validation_feedback(issues, attempt)
 
     if best_draft is None:
         raise GenerationError("Ollama не вернул ни одного структурно корректного черновика.")
+
+    # Remove claims the model failed to correct, then re-run every validator.
+    best_draft, sanitized = _sanitize_draft(best_draft, source_text, product)
+    if sanitized:
+        best_issues = validate_generated_copy(best_draft, source_text, product)
 
     # If the only remaining field-level problem is SEO length/content, repair that field alone.
     seo_issues = validate_seo_description(best_draft.seo_description, source_text, product)
@@ -236,6 +328,7 @@ async def generate_product_copy(
             max_attempts,
             seo_repair_attempts=seo_repair_attempts,
             fallback_used=fallback_used,
+            sanitized=sanitized,
         )
 
     return _to_response(
@@ -246,4 +339,5 @@ async def generate_product_copy(
         max_attempts,
         seo_repair_attempts=seo_repair_attempts,
         fallback_used=fallback_used,
+        sanitized=sanitized,
     )
