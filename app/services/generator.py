@@ -66,6 +66,27 @@ def _is_clean(text: str, source_text: str, product: ProductInput, field: str) ->
     )
 
 
+def _limit_seo_title(title: str, product: ProductInput, limit: int = 70) -> str:
+    """Keep SEO titles within the hard limit without cutting a word when possible."""
+    cleaned = " ".join(title.split())
+    if len(cleaned) <= limit:
+        return cleaned
+
+    words = cleaned.split()
+    while len(words) > 1 and len(" ".join(words)) > limit:
+        words.pop()
+    candidate = " ".join(words)
+    if len(candidate) <= limit:
+        return candidate
+
+    fallback = " ".join(part for part in (product.manufacturer, product.name) if part)
+    fallback_words = fallback.split()
+    while len(fallback_words) > 1 and len(" ".join(fallback_words)) > limit:
+        fallback_words.pop()
+    candidate = " ".join(fallback_words)
+    return candidate[:limit].rstrip(" ,;:—-") or cleaned[:limit].rstrip()
+
+
 def _sanitize_draft(
     draft: LLMProductCopy, source_text: str, product: ProductInput
 ) -> tuple[LLMProductCopy, bool]:
@@ -77,10 +98,12 @@ def _sanitize_draft(
     sales = draft.sales_section
     changed = False
 
-    title = draft.seo_title.strip()
+    title = _limit_seo_title(draft.seo_title, product)
+    if title != draft.seo_title.strip():
+        changed = True
     if not _is_clean(title, source_text, product, "SEO-заголовок"):
-        base = " ".join(part for part in (product.name, product.manufacturer) if part)
-        title = base[:70].rstrip(" ,;:—-") or title
+        base = " ".join(part for part in (product.manufacturer, product.name) if part)
+        title = _limit_seo_title(base, product)
         changed = True
 
     description = drop_flagged_sentences(
