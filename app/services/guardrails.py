@@ -332,12 +332,21 @@ def validate_generated_copy(
             "В сгенерированных полях обнаружены числовые значения, отсутствующие во входных данных: "
             + ", ".join(unsupported)
         )
-    unsupported_units = find_unsupported_unit_pairs(all_generated_text(draft), source_text)
-    if unsupported_units:
-        issues.append(
-            "Числовые значения связаны с неподтверждёнными единицами измерения: "
-            + ", ".join(unsupported_units)
-        )
+    unit_checks = [
+        ("SEO-заголовок", draft.seo_title),
+        ("SEO-описание", draft.seo_description),
+        ("Поисковые запросы", "\n".join(draft.seo_queries)),
+        ("Кому подходит", "\n".join(sales.suitable_for)),
+        ("Решаемые задачи", "\n".join(sales.tasks_solved)),
+        ("Тезисы для менеджера", sales.pitch),
+    ]
+    for field_name, field_text in unit_checks:
+        unsupported_units = find_unsupported_unit_pairs(field_text, source_text)
+        if unsupported_units:
+            issues.append(
+                f"Поле «{field_name}»: числа связаны с неподтверждёнными единицами измерения: "
+                + ", ".join(unsupported_units)
+            )
     if product is not None:
         issues.extend(find_lost_qualifiers(all_generated_text(draft), product))
     for finding in audit_draft_claims(draft, source_text, product):
