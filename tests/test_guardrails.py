@@ -225,6 +225,23 @@ def test_number_guard_accepts_temperature_range_spelled_out_with_sign_words() ->
 
 
 def test_pressure_transmitter_treats_current_output_as_present() -> None:
+def test_measured_medium_temperature_range_cannot_drop_lower_boundary() -> None:
+    from app.services.claim_audit import audit_spec_value_mismatches
+
+    product = ProductInput(
+        name="ОВЕН ПД100",
+        category="pressure_transmitter",
+        specs={"Температурный диапазон измеряемой среды": "−40…+100 °C"},
+    )
+    findings = audit_spec_value_mismatches(
+        "Измерение давления в средах с температурой до +100 °C.",
+        product,
+        "Решаемые задачи",
+    )
+    assert findings
+    assert findings[0].category == "Диапазон температуры измеряемой среды"
+
+
     product = ProductInput(
         name="ОВЕН ПД100-ДИ4,0-185-0,5",
         category="pressure_transmitter",
@@ -310,6 +327,25 @@ def test_safe_seo_fallback_uses_product_copy_style() -> None:
 
 
 def test_unit_guard_does_not_join_a_number_to_the_next_line_initial() -> None:
+def test_unsupported_unit_diagnostic_identifies_the_generated_field() -> None:
+    from app.services.guardrails import build_source_text
+
+    product = ProductInput(
+        name="Манометр DM 02",
+        specs={"Диапазон измерений": "0–1,6 МПа"},
+        description="Манометр для измерения давления.",
+    )
+    draft = _draft(
+        sales_section={
+            "suitable_for": ["Специалисты по КИПиА"],
+            "tasks_solved": ["Измерение давления"],
+            "pitch": "Потребление: 1 В.",
+        }
+    )
+    issues = validate_generated_copy(draft, build_source_text(product), product)
+    assert any("Тезисы для менеджера" in issue and "1 в" in issue for issue in issues)
+
+
     source = "Количество чувствительных элементов — 1 шт."
     generated = "Количество чувствительных элементов — 1\nВ описании также приведены параметры."
 
