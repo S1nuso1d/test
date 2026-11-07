@@ -330,7 +330,7 @@ def test_measured_medium_temperature_range_cannot_drop_lower_boundary() -> None:
         "Решаемые задачи",
     )
     assert findings
-    assert findings[0].category == "Диапазон температуры измеряемой среды"
+    assert findings[0].category == "Температурный диапазон измеряемой среды"
 
 
 def test_unsupported_unit_diagnostic_identifies_the_generated_field() -> None:
