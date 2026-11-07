@@ -226,6 +226,29 @@ async def test_generator_retries_when_technical_range_is_put_in_audience_field(m
 
 
 async def test_generator_removes_claims_the_model_could_not_fix(monkeypatch) -> None:
+async def test_generator_trims_overlong_title_after_final_sanitization(monkeypatch) -> None:
+    async def fake_generate_json(self, system_prompt: str, user_prompt: str) -> dict:
+        return good_response(
+            seo_title="Термопреобразователь ОВЕН ДТС024-100П.В3.30/1 для измерения температуры"
+        )
+
+    monkeypatch.setattr("app.services.generator.LLMClient.generate_json", fake_generate_json)
+    result = await generate_product_copy(
+        ProductInput(
+            name="ОВЕН ДТС024-100П.В3.30/1",
+            manufacturer="ОВЕН",
+            category="temperature_sensor",
+            description="Термопреобразователь сопротивления для измерения температуры.",
+            specs={"Длина кабельного вывода": "1 м"},
+        ),
+        Settings(),
+    )
+
+    assert len(result.seo_title) <= 70
+    assert result.status == "needs_review"
+    assert "температуры" not in result.seo_title
+
+
     prompts: list[str] = []
 
     async def fake_generate_json(self, system_prompt: str, user_prompt: str) -> dict:
