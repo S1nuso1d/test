@@ -245,6 +245,39 @@ def find_unsupported_unit_pairs(generated_text: str, source_text: str) -> list[s
     return [f"{number} {unit}" for number, unit in sorted(unsupported)]
 
 
+_QUALIFIED_VALUE_RE = re.compile(
+    r"^(?P<q>не\s+более|не\s+менее|не\s+выше|не\s+ниже)\s+(?P<tail>\d.*)$", re.IGNORECASE
+)
+_QUALIFIER_BEFORE_RE = re.compile(
+    r"(?:не\s+более|не\s+менее|не\s+выше|не\s+ниже|более|менее|до|от|≤|≥)\s*$",
+    re.IGNORECASE,
+)
+
+
+def find_lost_qualifiers(generated_text: str, product: ProductInput) -> list[str]:
+    """Detect when a source limit such as 'не более 5 мА' becomes a bare value."""
+    issues: list[str] = []
+    for key, raw_value in product.specs.items():
+        value = _stringify(raw_value).strip()
+        match = _QUALIFIED_VALUE_RE.match(value)
+        if not match:
+            continue
+        tail = match.group("tail").split("(")[0].strip()
+        pattern = re.compile(
+            r"(?<![\w,.])" + r"\s+".join(re.escape(part) for part in tail.split()) + r"(?!\w)",
+            re.IGNORECASE,
+        )
+        for hit in pattern.finditer(generated_text):
+            before = generated_text[max(0, hit.start() - 20) : hit.start()]
+            if not _QUALIFIER_BEFORE_RE.search(before):
+                issues.append(
+                    f"Потерян модификатор значения: у параметра «{key}» в источнике "
+                    f"«{value», а в тексте «{tail}» без «{match.group('q')}»"
+                )
+                break
+    return issues
+
+
 def all_generated_text(draft: LLMProductCopy) -> str:
     sales = draft.sales_section
     pieces = [draft.seo_title, draft.seo_description, *draft.seo_queries]
@@ -305,6 +338,8 @@ def validate_generated_copy(
             "Числовые значения связаны с неподтверждёнными единицами измерения: "
             + ", ".join(unsupported_units)
         )
+    if product is not None:
+        issues.extend(find_lost_qualifiers(all_generated_text(draft), product))
     for finding in audit_draft_claims(draft, source_text, product):
         issues.append(
             f"{finding.field}: неподтверждённое утверждение «{finding.claim}». "
@@ -340,6 +375,8 @@ def validate_seo_description(
             "В SEO-описании указаны неподтверждённые сочетания числа и единицы измерения: "
             + ", ".join(unsupported_units)
         )
+    if product is not None:
+        issues.extend(find_lost_qualifiers(cleaned, product))
     for finding in audit_text_claims(cleaned, source_text, "SEO-описание"):
         issues.append(
             f"SEO-описание: неподтверждённое утверждение «{finding.claim}». "
