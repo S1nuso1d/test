@@ -303,7 +303,9 @@ def test_safe_seo_fallback_uses_product_copy_style() -> None:
     assert 800 <= len(description) <= 1200
     assert "В исходных данных указан товар" not in description
     assert "В карточке приведены характеристики" not in description
-    assert "термопреобразователь сопротивления предназначен для непрерывного измерения" in description
+    assert "Прибор предназначен для непрерывного измерения" in description
+    assert description.count("ОВЕН ДТС024-100П.В3.30/1") == 1
+    assert ".. " not in description
     assert "Ключевые параметры исполнения" in description
 
 
