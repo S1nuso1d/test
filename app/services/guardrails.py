@@ -467,7 +467,7 @@ def build_safe_seo_description(product: ProductInput) -> str:
             if len(candidate) > 320:
                 candidate = candidate[:317].rsplit(" ", 1)[0].rstrip(" ,;:") + "…"
             if candidate.casefold().startswith("для "):
-                blocks.append(f"Прибор предназначен {candidate}.")
+                blocks.append(f"Прибор предназначен {candidate.rstrip('.!?')}.")
             else:
                 blocks.append(candidate.rstrip(".") + "." if not candidate.endswith((".", "!", "?")) else candidate)
             break
