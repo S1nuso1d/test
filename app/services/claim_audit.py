@@ -224,6 +224,21 @@ def audit_text_claims(
 
         for match in pattern.finditer(generated_text):
             claim = match.group(0).strip()
+            if label == "Материал корпуса перепутан с материалом защитной арматуры":
+                material_match = re.search(
+                    r"стал\\w*|латун\\w*|алюмини\\w*", claim, re.IGNORECASE
+                )
+                source_housing_materials = re.findall(
+                    r"(?:материал\\w*\\s+корпус\\w*|корпус\\w*)"
+                    r"[^.!?\\n]{0,60}(?:стал\\w*|латун\\w*|алюмини\\w*)",
+                    source_text,
+                    re.IGNORECASE,
+                )
+                if material_match and any(
+                    _stem_key(material_match.group(0)) in _stem_key(source_phrase)
+                    for source_phrase in source_housing_materials
+                ):
+                    continue
             if label == "Степень защиты IP":
                 if re.sub(r"\s+", "", claim).upper() in source_matches:
                     continue
