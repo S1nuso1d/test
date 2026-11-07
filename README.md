@@ -242,10 +242,10 @@ python scripts/run_submission_check.py --products examples/product_oven_dts024_1
 Последний успешный прогон GitHub Actions от **7 ноября 2026 года**:
 
 - Ruff: **All checks passed**;
-- pytest: **114 passed, 1 warning**;
+- pytest: **115 passed, 1 warning**;
 - ошибок тестирования нет.
 
-[Открыть GitHub Actions](https://github.com/S1nuso1d/test/actions/runs/42373727581)
+[Открыть GitHub Actions](https://github.com/S1nuso1d/test/actions/runs/42373934483)
 
 Тесты охватывают:
 
@@ -265,7 +265,7 @@ python scripts/run_submission_check.py --products examples/product_oven_dts024_1
 
 Один warning связан с предупреждением Starlette о совместном использовании httpx и TestClient. Он не привёл к падению тестов.
 
-**Важно:** CI использует изолированный (замоканный) Ollama-клиент. 114 тестов подтверждают логику и структуру приложения, но не доказывают качество фактических текстов конкретной LLM.
+**Важно:** CI использует изолированный (замоканный) Ollama-клиент. 115 тестов подтверждают логику и структуру приложения, но не доказывают качество фактических текстов конкретной LLM.
 
 ### Фактическая генерация
 
