@@ -226,11 +226,11 @@ def audit_text_claims(
             claim = match.group(0).strip()
             if label == "Материал корпуса перепутан с материалом защитной арматуры":
                 material_match = re.search(
-                    r"стал\\w*|латун\\w*|алюмини\\w*", claim, re.IGNORECASE
+                    r"стал\w*|латун\w*|алюмини\w*", claim, re.IGNORECASE
                 )
                 source_housing_materials = re.findall(
-                    r"(?:материал\\w*\\s+корпус\\w*|корпус\\w*)"
-                    r"[^.!?\\n]{0,60}(?:стал\\w*|латун\\w*|алюмини\\w*)",
+                    r"(?:материал\w*\s+корпус\w*|корпус\w*)"
+                    r"[^.!?\n]{0,60}(?:стал\w*|латун\w*|алюмини\w*)",
                     source_text,
                     re.IGNORECASE,
                 )
