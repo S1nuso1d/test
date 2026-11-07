@@ -18,9 +18,9 @@ from app.schemas import (
 DATA_NOT_AVAILABLE = "данных нет"
 _NUMBER_PATTERN = re.compile(r"(?<![\w])[-−+]?\d+(?:[.,]\d+)?(?![\w])")
 _NUMBER_UNIT_PATTERN = re.compile(
-    r"(?<![\w])(?P<number>[-−+]?\d+(?:[.,]\d+)?)\s*"
-    r"(?P<unit>градус\w*\s+цельси\w*|градус\w*\s+фаренгейт\w*|"
-    r"degrees?\s+celsius|degrees?\s+fahrenheit|°\s*[cсfф]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
+    r"(?<![\w])(?P<number>[-−+]?\d+(?:[.,]\d+)?)[ \t]*"
+    r"(?P<unit>градус\w*[ \t]+цельси\w*|градус\w*[ \t]+фаренгейт\w*|"
+    r"degrees?[ \t]+celsius|degrees?[ \t]+fahrenheit|°\s*[cсfф]|м³/ч|м3/ч|л/мин|л/ч|мпа|кпа|гпа|па|бар|атм|"
     r"мм|см|мкм|нм|км|м|ма|квт|вт|мв|кв|кг|мг|г|мл|л|"
     r"кгц|мгц|ггц|гц|%|(?-i:В|А)|mpa|kpa|gpa|pa|bar|atm|mm|cm|um|nm|km|"
     r"ma|kw|w|mv|kv|(?-i:V|A)|kg|mg|g|ml|l|khz|mhz|ghz|hz)"
@@ -448,119 +448,121 @@ def compact_seo_description(description: str, product: ProductInput) -> str | No
 
 
 def build_safe_seo_description(product: ProductInput) -> str:
-    """Build a transparent, fact-safe fallback from source data and buyer checklists.
-
-    The text describes no new product properties: generic passages are framed as
-    checks the buyer should perform, not as claims about the instrument.
-    """
+    """Build a readable, fact-safe fallback without exposing internal data-processing language."""
     name = product.name or "Указанный прибор"
-    identity = f"В исходных данных указан товар «{name}»."
-    if product.manufacturer:
-        identity += f" Производитель — {product.manufacturer}."
+    blocks = [f"{name}."]
 
-    source_description = (product.description or "").strip()
-    if len(source_description) > 260:
-        source_description = source_description[:257].rsplit(" ", 1)[0].rstrip(" ,;:") + "…"
-    if source_description:
-        identity += f" В описании указано: {source_description}"
+    description = (product.description or "").strip()
+    if description:
+        if description.casefold().startswith(name.casefold()):
+            description = description[len(name):].lstrip(" —:;.")
+        sentences = re.split(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z])", description)
+        for sentence in sentences:
+            candidate = sentence.strip()
+            if not candidate:
+                continue
+            lowered = candidate.casefold()
+            if any(token in lowered for token in ("в карточке", "в исходных данных", "в карточке союза-прибор")):
+                continue
+            if len(candidate) > 320:
+                candidate = candidate[:317].rsplit(" ", 1)[0].rstrip(" ,;:") + "…"
+            if candidate.casefold().startswith("для "):
+                blocks.append(f"{name} предназначен {candidate}.")
+            else:
+                blocks.append(candidate.rstrip(".") + "." if not candidate.endswith((".", "!", "?")) else candidate)
+            break
 
     values = [
         (str(key).strip(), _stringify(value).strip())
         for key, value in product.specs.items()
         if value is not None and _stringify(value).strip()
     ]
-    blocks = [identity]
-    if values:
-        summary = "В карточке приведены характеристики: " + "; ".join(
-            f"{key} — {value}" for key, value in values[:5]
+    priority_terms = (
+        "диапазон", "нсх", "давление", "токовый выход", "выходной сигнал",
+        "напряжение", "температур", "степень защиты", "класс точности",
+        "присоединение", "длина", "погрешность",
+    )
+    values.sort(
+        key=lambda item: min(
+            (index for index, term in enumerate(priority_terms) if term in item[0].casefold()),
+            default=len(priority_terms),
+        )
+    )
+    selected = values[:5]
+    if selected:
+        summary = "Ключевые параметры исполнения: " + "; ".join(
+            f"{key} — {value}" for key, value in selected
         ) + "."
         blocks.append(summary)
 
-    hints: list[str] = []
-    for key, value in values:
-        normalized = key.casefold()
-        if any(token in normalized for token in ("диапазон", "range", "предел измер")):
-            hint = (
-                f"Параметр «{key}» ({value}) сопоставьте с ожидаемыми условиями измерения "
-                "и требованиями процесса. Допустимый режим проверьте по паспорту: "
-                "указанное значение само по себе не подтверждает пригодность для конкретной установки."
-            )
-        elif any(token in normalized for token in ("точност", "accuracy")):
-            hint = (
-                f"Параметр «{key}» ({value}) сравните с требованиями к измерительной задаче. "
-                "Одно обозначение не позволяет делать выводы о поверке, межповерочном "
-                "интервале или погрешности в конкретных условиях."
-            )
-        elif any(token in normalized for token in ("присоедин", "резьб", "connection", "thread")):
-            hint = (
-                f"Значение «{key}» ({value}) сверьте с ответной частью и монтажной документацией. "
-                "Исходные данные не подтверждают совместимость по типу резьбы, уплотнению "
-                "и другим параметрам узла."
-            )
-        elif any(token in normalized for token in ("диаметр", "размер", "габарит", "diameter", "size")):
-            hint = (
-                f"Параметр «{key}» ({value}) используйте для предварительной проверки компоновки. "
-                "Для окончательного решения могут потребоваться чертёж и установочные размеры; "
-                "по одному значению нельзя подтвердить возможность монтажа."
-            )
-        else:
-            hint = (
-                f"Параметр «{key}» ({value}) сопоставьте с требованиями вашей задачи и паспортом "
-                "изделия. Не переносите выводы о свойствах и совместимости с похожих моделей."
-            )
-        hints.append(hint)
-
-    for hint in hints:
-        candidate = " ".join(blocks + [hint])
-        if len(candidate) <= 1180:
-            blocks.append(hint)
-
     missing = find_missing_data(product)
     if missing.expected_specs:
-        paragraph = (
-            "В исходных данных не указаны ожидаемые параметры: "
+        blocks.append(
+            "Для окончательного подбора запросите у поставщика следующие параметры: "
             + ", ".join(missing.expected_specs[:5])
-            + ". Запросите их у поставщика, если они важны для выбора."
+            + ". Не заменяйте отсутствующие значения характеристиками похожих исполнений."
         )
-        if len(" ".join(blocks + [paragraph])) <= 1200:
-            blocks.append(paragraph)
 
-    extras = [
-        (
-            "При сравнении предложений используйте одинаковые критерии и проверяйте, "
-            "что сведения относятся именно к указанной модели, а не к другой модификации."
+    category, _ = detect_category(product)
+    guidance_by_category = {
+        "pressure_gauge": (
+            "При выборе манометра сопоставьте диапазон измерений и класс точности с требованиями "
+            "измерительной задачи. Проверьте, что присоединение соответствует ответной части узла, "
+            "а габариты корпуса подходят для предусмотренного места установки."
+        ),
+        "temperature_sensor": (
+            "При выборе термопреобразователя сопоставьте требуемый диапазон температур с указанной "
+            "номинальной статической характеристикой. Отдельно проверьте длину кабельного вывода, "
+            "схему соединения проводников и условия применения конкретного исполнения."
+        ),
+        "pressure_transmitter": (
+            "При выборе преобразователя давления сопоставьте предел измерения с рабочим диапазоном "
+            "объекта, выходной сигнал — с входом системы автоматизации, а питание — с параметрами "
+            "доступного источника. Температурные пределы измеряемой среды и окружающего воздуха "
+            "рассматривайте раздельно."
+        ),
+        "temperature_transmitter": (
+            "При выборе преобразователя температуры сопоставьте тип входного датчика, диапазон "
+            "измерения и выходной сигнал с требованиями измерительного канала. Условия подключения "
+            "и настройки уточните по документации конкретной модификации."
+        ),
+    }
+    guidance = [
+        guidance_by_category.get(
+            category,
+            "При выборе прибора сопоставьте его назначение и указанные параметры с требованиями "
+            "технологического процесса и измерительного канала. Само наличие отдельной характеристики "
+            "не подтверждает совместимость с конкретной установкой.",
         ),
         (
-            "Перед оформлением заказа подтвердите полное обозначение модели, состав поставки "
-            "и наличие нужной документации. Отсутствующие значения не следует заменять предположениями."
+            "Перед закупкой проверьте полное обозначение модели, запросите паспорт и руководство "
+            "на это исполнение, подтвердите условия монтажа, подключения и комплектность поставки. "
+            "Не переносите на выбранный прибор характеристики других модификаций или всего семейства."
         ),
         (
-            "Описание основано только на переданных сведениях, не подтверждает совместимость "
-            "с конкретной системой и не заменяет паспорт изделия или консультацию производителя."
+            "Если в описании не хватает важного для выбора параметра, запросите его у поставщика "
+            "и зафиксируйте ответ документально. До получения подтверждения не подменяйте отсутствующее "
+            "значение типовым значением для похожего прибора."
         ),
         (
-            "Если для выбора требуется дополнительный параметр, зафиксируйте его как вопрос "
-            "к поставщику и дождитесь документального подтверждения до согласования заказа."
+            "При сравнении предложений используйте одинаковые критерии и проверяйте, что сведения "
+            "относятся к полному обозначению выбранной модели. Дополнительные условия эксплуатации, "
+            "совместимость и состав поставки следует согласовать по документации производителя."
         ),
     ]
-    for extra in extras:
-        current = " ".join(blocks)
-        if len(current) >= 800:
+    for paragraph in guidance:
+        candidate = " ".join(blocks + [paragraph])
+        if len(candidate) <= 1200:
+            blocks.append(paragraph)
+        if len(" ".join(blocks)) >= 800:
             break
-        if len(current + " " + extra) <= 1200:
-            blocks.append(extra)
 
     result = " ".join(blocks).strip()
-    while len(result) > 1200 and len(blocks) > 1:
-        blocks.pop()
-        result = " ".join(blocks).strip()
-
     if not 800 <= len(result) <= 1200:
         raise ValueError(
             "Не удалось безопасно сформировать SEO-описание длиной 800–1200 символов."
         )
     return result
-
 
 def calculate_quality_score(
     draft: LLMProductCopy, source_text: str, product: ProductInput | None = None

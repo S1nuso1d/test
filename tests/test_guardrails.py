@@ -279,3 +279,36 @@ def test_overlong_seo_is_compacted_without_cutting_sentences_or_changing_facts()
     assert "от минус 40 до плюс 100 градусов Цельсия" in compacted
     assert "от минус 40 до плюс 80 градусов Цельсия" in compacted
     assert not validate_seo_description(compacted, build_source_text(product), product)
+
+
+
+def test_safe_seo_fallback_uses_product_copy_style() -> None:
+    product = ProductInput(
+        name="ОВЕН ДТС024-100П.В3.30/1 — термопреобразователь сопротивления",
+        manufacturer="ОВЕН",
+        category="temperature_sensor",
+        specs={
+            "Номинальная статическая характеристика (НСХ)": "100П",
+            "Длина кабельного вывода": "1 м",
+            "Рабочий диапазон измеряемых температур": "−50…+250 °C",
+            "Степень защиты датчика": "IP54",
+        },
+        description=(
+            "ОВЕН ДТС024-100П.В3.30/1 — термопреобразователь сопротивления "
+            "для непрерывного измерения температуры рабочих сред."
+        ),
+    )
+    description = build_safe_seo_description(product)
+
+    assert 800 <= len(description) <= 1200
+    assert "В исходных данных указан товар" not in description
+    assert "В карточке приведены характеристики" not in description
+    assert "термопреобразователь сопротивления предназначен для непрерывного измерения" in description
+    assert "Ключевые параметры исполнения" in description
+
+
+def test_unit_guard_does_not_join_a_number_to_the_next_line_initial() -> None:
+    source = "Количество чувствительных элементов — 1 шт."
+    generated = "Количество чувствительных элементов — 1\nВ описании также приведены параметры."
+
+    assert find_unsupported_unit_pairs(generated, source) == []

@@ -403,3 +403,41 @@ def test_lost_qualifier_is_detected() -> None:
     product = ProductInput(name="X", specs={"Потребляемая мощность": "не более 0,8 Вт"})
     assert find_lost_qualifiers("Потребляемая мощность 0,8 Вт.", product)
     assert not find_lost_qualifiers("Потребляемая мощность не более 0,8 Вт.", product)
+
+
+
+def test_audit_flags_humidity_dust_and_pressure_load_relabeling() -> None:
+    source = (
+        "Максимальное измеряемое давление: 4,0 МПа. "
+        "Степень защиты корпуса: IP65."
+    )
+    generated = (
+        "Работа в условиях повышенной влажности и пыли. "
+        "Прибор рассчитан на максимальную нагрузку 4,0 МПа."
+    )
+    findings = audit_text_claims(generated, source, "Решаемые задачи")
+    assert {finding.category for finding in findings} == {
+        "Повышенная влажность и пыль",
+        "Подмена измеряемого давления нагрузкой",
+    }
+
+
+def test_audit_flags_unconfirmed_stable_indication_and_installation_location() -> None:
+    findings = audit_text_claims(
+        "Стабильная индикация давления на панели управления.",
+        "Манометр DM 02 для измерения давления.",
+        "SEO-описание",
+    )
+    assert {finding.category for finding in findings} == {
+        "Неподтверждённые преимущества",
+        "Объект или место установки",
+    }
+
+
+def test_integrating_verb_is_checked_as_compatibility_claim() -> None:
+    findings = audit_text_claims(
+        "Конструкция позволяет интегрировать прибор в трубопровод.",
+        "Манометр с присоединением G1/2.",
+        "SEO-описание",
+    )
+    assert any(item.category == "Совместимость и интеграция" for item in findings)
