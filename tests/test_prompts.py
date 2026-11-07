@@ -66,6 +66,14 @@ def test_correction_prompt_contains_previous_draft_as_escaped_data() -> None:
     assert "\\u003c/previous_draft\\u003e" in prompt
 
 
+def test_system_prompt_preserves_range_and_prevents_common_product_inferences() -> None:
+    assert "−40…+100 °C» нельзя превращать в «до +100 °C" in SYSTEM_PROMPT
+    assert "защитной арматуры" in SYSTEM_PROMPT
+    assert "G1/2" in SYSTEM_PROMPT
+    assert "экономию на проводке" in SYSTEM_PROMPT
+    assert "максимальную механическую нагрузку" in SYSTEM_PROMPT
+
+
 def test_system_prompt_requires_natural_russian_and_qualifiers() -> None:
     assert "СТИЛЬ РУССКОГО ТЕКСТА" in SYSTEM_PROMPT
     assert "«не более»" in SYSTEM_PROMPT
