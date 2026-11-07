@@ -435,6 +435,45 @@ def test_audit_flags_unconfirmed_stable_indication_and_installation_location() -
 
 
 def test_integrating_verb_is_checked_as_compatibility_claim() -> None:
+def test_flange_claim_is_flagged_when_source_only_says_g_half() -> None:
+    findings = audit_text_claims(
+        "Присоединение G1/2 позволяет установить прибор на стандартные фланцевые соединения.",
+        "Манометр DM 02. Присоединение: G1/2.",
+        "Тезисы для менеджера",
+    )
+    assert any(item.category == "Фланцевое присоединение" for item in findings)
+
+
+def test_housing_material_is_not_inferred_from_protective_armature_material() -> None:
+    findings = audit_text_claims(
+        "Корпус прибора выполнен из стали 12Х18Н10Т.",
+        "Материал защитной арматуры для модели 024: сталь 12Х18Н10Т.",
+        "SEO-описание",
+    )
+    assert any(
+        item.category == "Материал корпуса перепутан с материалом защитной арматуры"
+        for item in findings
+    )
+
+
+def test_wiring_cost_saving_is_flagged_without_source_evidence() -> None:
+    findings = audit_text_claims(
+        "Двухпроводная схема обеспечивает экономию на проводке.",
+        "Токовый выход: 4…20 мА, двухпроводная схема.",
+        "Решаемые задачи",
+    )
+    assert any(item.category == "Неподтверждённая экономия при монтаже" for item in findings)
+
+
+def test_precise_display_claim_is_flagged_without_source_evidence() -> None:
+    findings = audit_text_claims(
+        "Прибор обеспечивает точное отображение значений давления.",
+        "Манометр DM 02. Диапазон: 0–1,6 МПа; класс точности: 1,5.",
+        "Тезисы для менеджера",
+    )
+    assert any(item.category == "Неподтверждённые преимущества" for item in findings)
+
+
     findings = audit_text_claims(
         "Конструкция позволяет интегрировать прибор в трубопровод.",
         "Манометр с присоединением G1/2.",
