@@ -263,7 +263,7 @@ async def test_generator_trims_overlong_title_after_final_sanitization(monkeypat
     monkeypatch.setattr("app.services.generator.LLMClient.generate_json", fake_generate_json)
     result = await generate_product_copy(
         ProductInput(
-            name="ОВЕН ДТС024-100П.В3.30/1",
+            name="ОВЕН ДТС024-100П.В3.30/1 — термопреобразователь сопротивления",
             manufacturer="ОВЕН",
             category="temperature_sensor",
             description="Термопреобразователь сопротивления для измерения температуры.",
@@ -274,4 +274,4 @@ async def test_generator_trims_overlong_title_after_final_sanitization(monkeypat
 
     assert len(result.seo_title) <= 70
     assert result.status == "needs_review"
-    assert "температуры" not in result.seo_title
+    assert result.seo_title == "ОВЕН ДТС024-100П.В3.30/1 — термопреобразователь сопротивления"
