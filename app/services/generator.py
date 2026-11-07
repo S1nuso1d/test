@@ -72,18 +72,17 @@ def _limit_seo_title(title: str, product: ProductInput, limit: int = 70) -> str:
     if len(cleaned) <= limit:
         return cleaned
 
-    words = cleaned.split()
+    # Prefer the actual source product name over cutting a generated phrase mid-thought.
+    source_name = " ".join(product.name.split())
+    if product.manufacturer and product.manufacturer.casefold() not in source_name.casefold():
+        source_name = f"{product.manufacturer} {source_name}".strip()
+    if len(source_name) <= limit:
+        return source_name
+
+    words = source_name.split()
     while len(words) > 1 and len(" ".join(words)) > limit:
         words.pop()
     candidate = " ".join(words)
-    if len(candidate) <= limit:
-        return candidate
-
-    fallback = " ".join(part for part in (product.manufacturer, product.name) if part)
-    fallback_words = fallback.split()
-    while len(fallback_words) > 1 and len(" ".join(fallback_words)) > limit:
-        fallback_words.pop()
-    candidate = " ".join(fallback_words)
     return candidate[:limit].rstrip(" ,;:—-") or cleaned[:limit].rstrip()
 
 
